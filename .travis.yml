@@ -1,0 +1,7 @@
+language: c
+compiler:
+  - clang
+  - gcc
+before_install:
+ - sudo apt-get update -qq
+ - sudo apt-get install -qq libxmlrpc-c3 libxmlrpc-core-c3-dev
