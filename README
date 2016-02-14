@@ -16,3 +16,9 @@ type your blog entry and use control + D and then return to end. (EOF)
 
 Alternatively, you may use a text file like this:
 jjclient -u username -p password < myfile.txt
+
+-----
+
+A graphical client is also provided in the gtk folder.
+
+This client requires Gtk 3.
