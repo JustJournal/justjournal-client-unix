@@ -35,7 +35,7 @@ SUCH DAMAGE.
 #include <xmlrpc-c/client.h>
 
 #define NAME "JustJournal/GTK"
-#define VERSION "1.0.3"
+#define VERSION "2.0"
 
 GtkWidget *user, *pass; /* textboxes */
 GtkTextBuffer *buffer;
@@ -45,6 +45,10 @@ static void msgbox( GtkWindow *parent, char * msg );
 static void cut_clicked (GtkButton*, GtkTextView*);
 static void copy_clicked (GtkButton*, GtkTextView*);
 static void paste_clicked (GtkButton*, GtkTextView*);
+
+void gtk_box_pack_start_defaults(GtkBox *box, GtkWidget *widget)  {
+	gtk_box_pack_start(box, widget, TRUE, TRUE, 0);
+}
 
 int main( int argc, char *argv[] )
 {
@@ -63,11 +67,11 @@ int main( int argc, char *argv[] )
     g_signal_connect (G_OBJECT (window), "destroy",
                   G_CALLBACK (gtk_main_quit), NULL);
 
-    cut = gtk_button_new_from_stock (GTK_STOCK_CUT);
-    copy = gtk_button_new_from_stock (GTK_STOCK_COPY);
-    paste = gtk_button_new_from_stock (GTK_STOCK_PASTE);
+    cut = gtk_button_new_from_icon_name("edit-cut", GTK_ICON_SIZE_SMALL_TOOLBAR);
+    copy = gtk_button_new_from_icon_name("edit-copy", GTK_ICON_SIZE_SMALL_TOOLBAR);
+    paste = gtk_button_new_from_icon_name("edit-paste", GTK_ICON_SIZE_SMALL_TOOLBAR);
 
-    hboxccp = gtk_hbox_new (TRUE, 5);
+    hboxccp = gtk_box_new (GTK_ORIENTATION_VERTICAL, 5);
     gtk_box_pack_start (GTK_BOX (hboxccp), cut, TRUE, TRUE, 0);
     gtk_box_pack_start (GTK_BOX (hboxccp), copy, TRUE, TRUE, 0);
     gtk_box_pack_start (GTK_BOX (hboxccp), paste, TRUE, TRUE, 0);
@@ -104,21 +108,21 @@ int main( int argc, char *argv[] )
                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_ALWAYS);
 
     /* create username hbox */
-    authbox = gtk_hbox_new( FALSE, 5 );
+    authbox = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 5 );
     gtk_box_pack_start_defaults( GTK_BOX (authbox), lbluser );
     gtk_box_pack_start_defaults( GTK_BOX (authbox), user );
 
     /* create password hbox */
-    authbox2 = gtk_hbox_new( FALSE, 5 );
+    authbox2 = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 5 );
     gtk_box_pack_start_defaults( GTK_BOX (authbox2), lblpass );
     gtk_box_pack_start_defaults( GTK_BOX (authbox2), pass );
 
-    vauthbox = gtk_vbox_new( FALSE, 5 );
+    vauthbox = gtk_box_new( GTK_ORIENTATION_VERTICAL, 5 );
     gtk_box_pack_start_defaults( GTK_BOX (vauthbox), authbox );
     gtk_box_pack_start_defaults( GTK_BOX (vauthbox), authbox2 );
 
     /* Setup the final box for layout in the window */
-    vbox = gtk_vbox_new( FALSE, 5 );
+    vbox = gtk_box_new( GTK_ORIENTATION_VERTICAL, 5 );
     gtk_box_pack_start( GTK_BOX (vbox), hboxccp, FALSE, TRUE, 5 );
     gtk_box_pack_start( GTK_BOX (vbox), vauthbox, FALSE, TRUE, 5 );
     gtk_box_pack_start( GTK_BOX (vbox), scrolled_win, TRUE, TRUE, 5 );
@@ -201,21 +205,21 @@ static void msgbox( GtkWindow * parent, char * msg )
     /* Create a non-modal dialog with one OK button. */
     dialog = gtk_dialog_new_with_buttons ("Information", parent,
                                         GTK_DIALOG_DESTROY_WITH_PARENT,
-                                        GTK_STOCK_OK, GTK_RESPONSE_OK,
-                                        NULL);
+					   ("_OK"),
+                                      	GTK_RESPONSE_ACCEPT,
+                                      	NULL);
 
-    gtk_dialog_set_has_separator (GTK_DIALOG (dialog), FALSE);
+    //gtk_dialog_set_has_separator (GTK_DIALOG (dialog), FALSE);
 
     label = gtk_label_new (msg);
-    image = gtk_image_new_from_stock (GTK_STOCK_DIALOG_INFO,
-                                    GTK_ICON_SIZE_DIALOG);
+    image = gtk_image_new_from_icon_name("dialog-information", GTK_ICON_SIZE_DIALOG);
 
-    hbox = gtk_hbox_new (FALSE, 5);
+    hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_container_set_border_width (GTK_CONTAINER (hbox), 10);
     gtk_box_pack_start_defaults (GTK_BOX (hbox), image);
     gtk_box_pack_start_defaults (GTK_BOX (hbox), label);
 
-    gtk_box_pack_start_defaults (GTK_BOX (GTK_DIALOG (dialog)->vbox), hbox);
+    gtk_box_pack_start_defaults (GTK_BOX (gtk_dialog_get_content_area (GTK_DIALOG (dialog))), hbox);
     gtk_widget_show_all (dialog);
 
     /* Call gtk_widget_destroy() when the dialog emits the response signal. */
