@@ -35,7 +35,7 @@ SUCH DAMAGE.
 #include <xmlrpc-c/client.h>
 
 #define NAME "JustJournal/GTK"
-#define VERSION "2.0"
+#define VERSION "2.0.0"
 
 GtkWidget *user, *pass; /* textboxes */
 GtkTextBuffer *buffer;
