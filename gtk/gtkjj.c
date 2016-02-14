@@ -1,6 +1,6 @@
 /* $Id: gtkjj.c,v 1.4 2008/09/27 02:06:02 laffer1 Exp $ */
 /*-
-Copyright (C) 2008 Lucas Holt. All rights reserved.
+Copyright (C) 2008, 2016 Lucas Holt. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions
@@ -71,7 +71,7 @@ int main( int argc, char *argv[] )
     copy = gtk_button_new_from_icon_name("edit-copy", GTK_ICON_SIZE_SMALL_TOOLBAR);
     paste = gtk_button_new_from_icon_name("edit-paste", GTK_ICON_SIZE_SMALL_TOOLBAR);
 
-    hboxccp = gtk_box_new (GTK_ORIENTATION_VERTICAL, 5);
+    hboxccp = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_pack_start (GTK_BOX (hboxccp), cut, TRUE, TRUE, 0);
     gtk_box_pack_start (GTK_BOX (hboxccp), copy, TRUE, TRUE, 0);
     gtk_box_pack_start (GTK_BOX (hboxccp), paste, TRUE, TRUE, 0);
