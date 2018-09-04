@@ -40,7 +40,7 @@ SUCH DAMAGE.
 #include <xmlrpc-c/client.h>
 
 #define NAME "JustJournal/UNIX"
-#define VERSION "1.0.3"
+#define VERSION "2.0.0"
 #define ENTRY_MAX 32000
 #define USERLEN 16
 #define PASSLEN 19
