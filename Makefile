@@ -1,6 +1,5 @@
 # Makefile for jjclient
-# $Id: Makefile,v 1.8 2009/06/04 05:16:43 laffer1 Exp $
-CC?=gcc
+CC?=cc
 CFLAGS?= -I/usr/local/include -I${LOCALBASE}/include -Wall -pedantic -std=c99 -O2
 LDFLAGS?=-L/usr/local/lib -L${LOCALBASE}/lib -lxmlrpc_client -lxmlrpc -lxmlrpc_xmlparse -lxmlrpc_xmltok -lxmlrpc_util -lcurl
 PREFIX?= /usr/local
