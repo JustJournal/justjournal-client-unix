@@ -4,8 +4,12 @@ To build and install:
 make
 sudo make install
 
-This software has been tested on MidnightBSD, FreeBSD and Mac OS X.  
+This software has been tested on MidnightBSD, FreeBSD, Linux and Mac OS X.  
 It requires xmlrpc-c to operate.
+
+On Ubuntu Linux, use 
+apt-get install -qq libxmlrpc-c3-dev
+
 
 Using the software:
 
