@@ -251,6 +251,7 @@ static void getRecentPosts( const char *host, const char *username, const char *
             xmlrpc_read_string( &env, varP, &postResult);
             printf( "%d %s\n\n", i, postResult );
             free((char *)postResult);
+	    postResult = NULL;
             xmlrpc_DECREF( varP );
         }
         die_if_fault_occurred( &env );
@@ -261,6 +262,7 @@ static void getRecentPosts( const char *host, const char *username, const char *
             xmlrpc_read_string( &env, varP, &postResult);
             printf( "%s\n\n", postResult );
             free((char *)postResult);
+	    postResult = NULL;
             xmlrpc_DECREF( varP );
         }
         die_if_fault_occurred( &env );
