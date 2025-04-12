@@ -91,6 +91,6 @@ JustJournal < 3.0.10 will work with older clients.
 
 ## History
 
-Originally hosted on SourceForge https://sourceforge.net/projects/justjournal/files/JustJournal%20UNIX%20Client/
+Originally hosted on SourceForge <https://sourceforge.net/projects/justjournal/files/JustJournal%20UNIX%20Client/>
 
 Written by Lucas Holt for JustJournal.com
