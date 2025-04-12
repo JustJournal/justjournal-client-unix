@@ -10,6 +10,13 @@ It requires xmlrpc-c to operate.
 On Ubuntu Linux, use 
 apt-get install -qq libxmlrpc-c3-dev
 
+To install on MidnightBSD:
+mport install jjclient
+
+To install on FreeBSD:
+pkg install jjclient
+
+(note freebsd version is very old)
 
 Using the software:
 
@@ -21,8 +28,29 @@ type your blog entry and use control + D and then return to end. (EOF)
 Alternatively, you may use a text file like this:
 jjclient -u username -p password < myfile.txt
 
+Other flags include -s for subject and -d for turning on debug messages
+
+Compiling on MidnightBSD:
+make 
+make install
+
+NOTE: if you want to use gmake, you need to specify CC as an env var as it defaults to
+c99 which breaks.  e.g.  
+env CC=gcc12 gmake 
+
 -----
 
 A graphical client is also provided in the gtk folder.
 
-This client requires Gtk 3.
+This client requires Gtk 3 and pkg-config to build along with
+xmlrpc-c.
+
+To install on MidnightBSD:
+mport install gtkjj
+
+
+Compiling on MidnightBSD:
+make or gmake can be used
+
+make
+make install
