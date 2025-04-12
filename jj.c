@@ -40,11 +40,12 @@ SUCH DAMAGE.
 #include <xmlrpc-c/client.h>
 
 #define NAME "JustJournal/UNIX"
-#define VERSION "2.0.0"
+#define VERSION "2.0.1"
 #define ENTRY_MAX 32000
-#define USERLEN 16
-#define PASSLEN 19
+#define USERLEN 51
+#define PASSLEN 31
 #define HOSTLEN 512
+#define TITLELEN 256
 #define HOST "www.justjournal.com"
 #define RECENT_POST_COUNT 15
 
@@ -61,8 +62,7 @@ int main( int argc, char *argv[] )
     char password[PASSLEN];
     char entry[ENTRY_MAX];
     char host[HOSTLEN];
-    char * title = NULL;
-    size_t titlelen;
+    char title[TITLELEN] = { '\0' };
     int c;
     size_t i;
     bool debug = false;
@@ -78,36 +78,29 @@ int main( int argc, char *argv[] )
         switch( c )
         {
             case 'h': /* host */	
-            	if ( strlen(optarg) > HOSTLEN - 16)
+            	if ( strlen(optarg) > HOSTLEN - 17)
             	{
             	    fprintf( stderr, "host name is too long" );
             	    exit(EXIT_FAILURE);   
             	}
-            	(void) snprintf(host, HOSTLEN, "http://%s/xml-rpc", optarg);
+            	(void) snprintf(host, HOSTLEN, "https://%s/xml-rpc", optarg);
             	hflag = true;
             	break;
          
             case 'u': /* username */
-                strncpy( username, optarg, USERLEN - 1 );
+                strncpy(username, optarg, USERLEN - 1);
                 username[USERLEN -1] = '\0';
                 uflag = true;
                 break;
          
             case 'p': /* password */
-                strncpy( password, optarg, PASSLEN - 1 );
+                strncpy(password, optarg, PASSLEN - 1);
                 password[PASSLEN -1] = '\0';
                 pflag = true;
                 break;
                 
             case 's': /* subject */
-            	titlelen = strlen(optarg);
-            	if ( (title = malloc((titlelen * sizeof(char)) + 1)) == NULL )
-            	{
-                    fprintf( stderr, "Unable to allocate memory." );
-                    exit(EXIT_FAILURE);
-                }    
-                strncpy( title, optarg, titlelen );
-                title[titlelen] = '\0';
+		snprintf(title, sizeof(title), "%s", optarg);
                 break;
                 
             case 'r': /* recent entries */
@@ -126,20 +119,20 @@ int main( int argc, char *argv[] )
     }
     argc -= optind;
     
-    if ( !uflag || !pflag )
+    if (!uflag || !pflag)
     {
         fprintf( stderr, "Username and password are required.\n" );
         usage( argv[0] );
     }
     
     /* set host if it's not defined */
-    if ( !hflag )
-        (void) snprintf(host, HOSTLEN, "http://%s/xml-rpc", HOST);
+    if (!hflag)
+        (void) snprintf(host, HOSTLEN, "https://%s/xml-rpc", HOST);
         
-    if ( debug && hflag )
+    if (debug && hflag)
         fprintf( stderr, "host is set to: %s\n", host );
 
-    if ( rflag )
+    if (rflag)
     {
         getRecentPosts( host, username, password );
         exit(0);
@@ -147,11 +140,11 @@ int main( int argc, char *argv[] )
 
     /* Copy the title into the top of entry if it's requested */
     entry[0] = '\0';
-    if ( title != NULL ) 
+    if ( title[0] != '\0' ) 
         (void) snprintf( entry, ENTRY_MAX, "<title>%s</title>", title );
         
     /* Start from title or the beginning and copy the entry from stdin */        
-    for ( i = strlen(entry); i < ENTRY_MAX -1; i++ )
+    for (i = strlen(entry); i < ENTRY_MAX -1; i++)
     {
         c = getchar();
         if ( c == EOF )

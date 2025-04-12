@@ -35,7 +35,7 @@ SUCH DAMAGE.
 #include <xmlrpc-c/client.h>
 
 #define NAME "JustJournal/GTK"
-#define VERSION "2.0.0"
+#define VERSION "2.0.1"
 
 GtkWidget *user, *pass; /* textboxes */
 GtkTextBuffer *buffer;
@@ -153,7 +153,7 @@ static void button_clicked( GtkButton *button, GtkWindow *parent )
     xmlrpc_client_init( XMLRPC_CLIENT_NO_FLAGS, NAME, VERSION );
     xmlrpc_env_init( &env );
 
-    resultP = xmlrpc_client_call( &env, "http://www.justjournal.com/xml-rpc",
+    resultP = xmlrpc_client_call( &env, "https://www.justjournal.com/xml-rpc",
                                 "blogger.newPost",
                                 "(sssssb)", 
 				"", /* key, not used */
