@@ -23,7 +23,7 @@
 .\"
 .\" $Id: jjclient.1,v 1.1 2008/09/27 00:30:40 laffer1 Exp $
 .\"
-.Dd September 25, 2008
+.Dd April 12, 2025
 .Dt JJCLIENT 1
 .Os
 .Sh NAME
@@ -44,6 +44,9 @@ utility creates blog entries on Just Journal based websites.
 Username and password must be set.  If the hostname is not specified,
 .Nm
 will use the www.justjournal.com site.
+.Pp
+As of version 2.0.2, all requests require HTTPS.  Prior versions
+used HTTP which is not secure.
 .Pp
 The following options are available:
 .Bl -tag -width indent
