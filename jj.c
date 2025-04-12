@@ -188,7 +188,7 @@ int main( int argc, char *argv[] )
 
 static void usage( const char *name )
 {
-    fprintf( stderr, "usage: %s -u USERNAME -p PASSWORD [-h host] [-s subject] [-d]\n", name );
+    fprintf( stderr, "jjclient %s\nusage: %s -u USERNAME -p PASSWORD [-h host] [-s subject] [-d]\n", VERSION, name );
     exit(EXIT_FAILURE);
 }
 
