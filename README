@@ -54,3 +54,11 @@ make or gmake can be used
 
 make
 make install
+
+------
+
+Compatibility:
+
+JustJournal client 2.0.1 or higher is required for JustJournal 3.0.11+.  
+JustJournal 3.0.10 is not supported
+JustJournal < 3.0.10 will work with older clients.
