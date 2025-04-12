@@ -81,47 +81,67 @@ int main(int argc, char *argv[])
         switch (c)
         {
         case 'h': /* host */
+            if (optarg == NULL)
+            {
+                fprintf(stderr, "Error: Host option requires an argument\n");
+                exit(EXIT_FAILURE);
+            }
             if (strlen(optarg) >= MAX_HOST_NAME)
             {
                 fprintf(stderr, "Error: Host argument is too long\n");
                 exit(EXIT_FAILURE);
             }
-            
+
             (void)snprintf(host, sizeof(host), "https://%s/xml-rpc", optarg);
             host[sizeof(host) - 1] = '\0';
-            
+
             hflag = true;
             break;
 
         case 'u': /* username */
+            if (optarg == NULL)
+            {
+                fprintf(stderr, "Error: username option requires an argument\n");
+                exit(EXIT_FAILURE);
+            }
             if (strlen(optarg) >= USERLEN)
             {
                 fprintf(stderr, "Error: Username is too long\n");
                 exit(EXIT_FAILURE);
             }
-            strncpy(username, optarg, USERLEN - 1);
+            (void)strncpy(username, optarg, USERLEN - 1);
             username[USERLEN - 1] = '\0';
             uflag = true;
             break;
 
         case 'p': /* password */
+            if (optarg == NULL)
+            {
+                fprintf(stderr, "Error: password option requires an argument\n");
+                exit(EXIT_FAILURE);
+            }
             if (strlen(optarg) >= PASSLEN)
             {
                 fprintf(stderr, "Error: Password is too long\n");
                 exit(EXIT_FAILURE);
             }
-            strncpy(password, optarg, PASSLEN - 1);
+            (void)strncpy(password, optarg, PASSLEN - 1);
             password[PASSLEN - 1] = '\0';
             pflag = true;
             break;
 
         case 's': /* subject */
+            if (optarg == NULL)
+            {
+                fprintf(stderr, "Error: Subject option requires an argument\n");
+                exit(EXIT_FAILURE);
+            }
             if (strlen(optarg) >= TITLELEN)
             {
                 fprintf(stderr, "Error: Subject is too long\n");
                 exit(EXIT_FAILURE);
             }
-            snprintf(title, sizeof(title), "%s", optarg);
+            (void)snprintf(title, sizeof(title), "%s", optarg);
             break;
 
         case 'r': /* recent entries */
