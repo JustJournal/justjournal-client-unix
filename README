@@ -7,8 +7,11 @@ sudo make install
 This software has been tested on MidnightBSD, FreeBSD, Linux and Mac OS X.  
 It requires xmlrpc-c to operate.
 
-On Ubuntu Linux, use 
-apt-get install -qq libxmlrpc-c3-dev
+On Ubuntu Linux, old releases needed:
+sudo apt-get install -qq libxmlrpc-c3-dev
+
+ubuntu 24.10+ needs 
+sudo apt-get install libxmlrpc-core-c3t64 libxmlrpc-core-c3-dev pkg-config
 
 To install on MidnightBSD:
 mport install jjclient
@@ -30,14 +33,17 @@ jjclient -u username -p password < myfile.txt
 
 Other flags include -s for subject and -d for turning on debug messages
 
-Compiling on MidnightBSD:
+Compiling on MidnightBSD & FreeBSD: (using bmake)
 make 
 make install
 
-NOTE: if you want to use gmake, you need to specify CC as an env var as it defaults to
-c99 which breaks.  e.g.  
-env CC=gcc12 gmake 
+NOTE: uses Makefile
 
+Compiling on Linux: (using gmake)
+make 
+make install
+
+NOTE: uses GNUmakefile
 -----
 
 A graphical client is also provided in the gtk folder.
