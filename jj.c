@@ -36,15 +36,22 @@ SUCH DAMAGE.
 #include <unistd.h>
 #include <errno.h>
 #include <limits.h>
+#include <ctype.h>
+#include <netdb.h>
+#include <regex.h>
 
 #include <xmlrpc-c/base.h>
 #include <xmlrpc-c/client.h>
 
 #define NAME "JustJournal/UNIX"
-#define VERSION "2.0.2"
+#define VERSION "2.0.3"
 #define ENTRY_MAX 32000
-#define USERLEN 51
-#define PASSLEN 31
+#define USERNAME_MIN_LENGTH 3
+#define USERNAME_MAX_LENGTH 50
+#define PASSWORD_MIN_LENGTH 6
+#define PASSWORD_MAX_LENGTH 30
+#define USERLEN USERNAME_MAX_LENGTH + 1
+#define PASSLEN PASSWORD_MAX_LENGTH + 1
 #define HOSTLEN 512
 #define MAX_HOST_NAME (HOSTLEN - 17)
 #define TITLELEN 256
@@ -54,6 +61,11 @@ SUCH DAMAGE.
 static void usage(const char *name);
 static void die_if_fault_occurred(xmlrpc_env *env);
 static void getRecentPosts(const char *host, const char *username, const char *password);
+
+static bool is_valid_hostname(const char *hostname);
+static bool is_valid_username(const char *input);
+static bool is_valid_password(const char *input);
+static void clear_sensitive_data(const void *data, size_t len);
 
 int main(int argc, char *argv[])
 {
@@ -89,6 +101,11 @@ int main(int argc, char *argv[])
             if (strlen(optarg) >= MAX_HOST_NAME)
             {
                 fprintf(stderr, "Error: Host argument is too long\n");
+                exit(EXIT_FAILURE);
+            }
+            if (!is_valid_hostname(optarg))
+            {
+                fprintf(stderr, "Error: Invalid hostname\n");
                 exit(EXIT_FAILURE);
             }
 
@@ -173,6 +190,16 @@ int main(int argc, char *argv[])
     if (debug && hflag)
         fprintf(stderr, "host is set to: %s\n", host);
 
+        if (!is_valid_username(username)) {
+            fprintf(stderr, "Error: Invalid username\n");
+            exit(EXIT_FAILURE);
+        }
+        
+        if (!is_valid_password(password)) {
+            fprintf(stderr, "Error: Invalid password\n");
+            exit(EXIT_FAILURE);
+        }
+
     if (rflag)
     {
         getRecentPosts(host, username, password);
@@ -212,6 +239,7 @@ int main(int argc, char *argv[])
                                  password, /* journal password */
                                  entry,    /* blog content */
                                  true);    /* post now */
+    clear_sensitive_data(password, sizeof(password));
     die_if_fault_occurred(&env);
 
     xmlrpc_read_string(&env, resultP, &postResult);
@@ -270,6 +298,7 @@ static void getRecentPosts(const char *host, const char *username, const char *p
                                  username,           /* journal username */
                                  password,           /* journal password */
                                  RECENT_POST_COUNT); /* post count */
+    clear_sensitive_data(password, sizeof(password));
     die_if_fault_occurred(&env);
 
     arrsize = xmlrpc_array_size(&env, resultP);
@@ -306,4 +335,90 @@ static void getRecentPosts(const char *host, const char *username, const char *p
     xmlrpc_DECREF(resultP);
     xmlrpc_env_clean(&env);
     xmlrpc_client_cleanup();
+}
+
+static bool is_valid_username(const char *input) {
+    if (strlen(input) < USERNAME_MIN_LENGTH || strlen(input) > USERNAME_MAX_LENGTH) {
+        return false;
+    }
+
+    regex_t regex;
+    int reti;
+    char msgbuf[100];
+
+    reti = regcomp(&regex, "^[A-Za-z0-9_]+$", REG_EXTENDED);
+    if (reti) {
+        fprintf(stderr, "Could not compile regex\n");
+        exit(EXIT_FAILURE);
+    }
+
+    reti = regexec(&regex, input, 0, NULL, 0);
+    if (!reti) {
+        regfree(&regex);
+        return true;
+    }
+    else if (reti == REG_NOMATCH) {
+        regfree(&regex);
+        return false;
+    }
+    else {
+        regerror(reti, &regex, msgbuf, sizeof(msgbuf));
+        fprintf(stderr, "Regex match failed: %s\n", msgbuf);
+        regfree(&regex);
+        exit(EXIT_FAILURE);
+    }
+}
+
+static bool is_valid_password(const char *input) {
+    if (strlen(input) < PASSWORD_MIN_LENGTH || strlen(input) > PASSWORD_MAX_LENGTH) {
+        return false;
+    }
+
+    regex_t regex;
+    int reti;
+    char msgbuf[100];
+
+    reti = regcomp(&regex, "^[A-Za-z0-9_@.!&*#$?^ ]+$", REG_EXTENDED);
+    if (reti) {
+        fprintf(stderr, "Could not compile regex\n");
+        exit(EXIT_FAILURE);
+    }
+
+    reti = regexec(&regex, input, 0, NULL, 0);
+    if (!reti) {
+        regfree(&regex);
+        return true;
+    }
+    else if (reti == REG_NOMATCH) {
+        regfree(&regex);
+        return false;
+    }
+    else {
+        regerror(reti, &regex, msgbuf, sizeof(msgbuf));
+        fprintf(stderr, "Regex match failed: %s\n", msgbuf);
+        regfree(&regex);
+        exit(EXIT_FAILURE);
+    }
+}
+
+static bool is_valid_hostname(const char *hostname) {
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    
+    int status = getaddrinfo(hostname, NULL, &hints, &res);
+    if (status != 0) {
+        return false;
+    }
+    
+    freeaddrinfo(res);
+    return true;
+}
+
+static void clear_sensitive_data(const void *data, size_t len) {
+    volatile unsigned char *p = (volatile unsigned char *)data;
+    while (len--) {
+        *p++ = 0;
+    }
 }
