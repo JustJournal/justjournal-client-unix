@@ -26,10 +26,9 @@ jobs:
           arch: ${{ matrix.arch }}
           release: ${{ matrix.version }}
           usesh: true
-          # Fix for FreeBSD 15.0: disable repo update during pkg install
-          prepare: |
-            export PKG_DISABLE_AUTOUPDATE=1
-            export ASSUME_ALWAYS_YES=1
-            pkg install -y xmlrpc-c 2>/dev/null || true
+          envs: |
+            PKG_DISABLE_AUTOUPDATE=1
+            ASSUME_ALWAYS_YES=1
+          prepare: pkg install -y xmlrpc-c 2>/dev/null || true
           run: |
             make
