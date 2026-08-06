@@ -42,6 +42,19 @@ SUCH DAMAGE.
 #include <xmlrpc-c/base.h>
 #include <xmlrpc-c/client.h>
 
+/* Portable secure memory zeroing */
+#include <strings.h>
+#if defined(HAVE_EXPLICIT_BZERO)
+#define secure_bzero explicit_bzero
+#else
+/* Fallback for platforms without explicit_bzero (e.g., musl, older glibc, macOS) */
+static inline void secure_bzero(void *s, size_t n) {
+    memset(s, 0, n);
+    /* Compiler barrier to prevent optimization */
+    __asm__ __volatile__("" : : "r"(s), "r"(n) : "memory");
+}
+#endif
+
 #define NAME "JustJournal/UNIX"
 #define VERSION "2.0.3"
 #define ENTRY_MAX 32000
@@ -64,7 +77,6 @@ static void getRecentPosts(const char *host, const char *username, const char *p
 static bool is_valid_hostname(const char *hostname);
 static bool is_valid_username(const char *input);
 static bool is_valid_password(const char *input);
-static void clear_sensitive_data(void *data, size_t len);
 
 int main(int argc, char *argv[])
 {
@@ -238,7 +250,7 @@ int main(int argc, char *argv[])
                                  password, /* journal password */
                                  entry,    /* blog content */
                                  true);    /* post now */
-    clear_sensitive_data((void *)password, sizeof(password));
+    secure_bzero((void *)password, sizeof(password));
     die_if_fault_occurred(&env);
 
     xmlrpc_read_string(&env, resultP, &postResult);
@@ -297,7 +309,7 @@ static void getRecentPosts(const char *host, const char *username, const char *p
                                  username,           /* journal username */
                                  password,           /* journal password */
                                  RECENT_POST_COUNT); /* post count */
-    clear_sensitive_data((void *)password, sizeof(password));
+    secure_bzero((void *)password, sizeof(password));
     die_if_fault_occurred(&env);
 
     arrsize = xmlrpc_array_size(&env, resultP);
@@ -423,11 +435,4 @@ static bool is_valid_hostname(const char *hostname) {
     
     freeaddrinfo(res);
     return true;
-}
-
-static void clear_sensitive_data(void *data, size_t len) {
-    volatile unsigned char *p = (volatile unsigned char *)data;
-    while (len--) {
-        *p++ = 0;
-    }
 }
