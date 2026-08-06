@@ -1,10 +1,10 @@
 # $Id: Makefile,v 1.4 2008/09/27 02:06:02 laffer1 Exp $
 # gtkjj: Just Journal for GTK
 CC?=cc
-CFLAGS= -D_DEFAULT_SOURCE -I/usr/local/include -I/usr/local/include/gtk-3.0 -I/usr/local/include/glib-2.0 -I/usr/local/lib/glib-2.0/include -I/usr/local/include/pango-1.0 -I/usr/local/include/cairo -I/usr/local/include/harfbuzz -I/usr/local/include/gdk-pixbuf-2.0 -I/usr/local/include/atk-1.0 -Wall -pedantic -std=c99 -O2
+CFLAGS= -D_DEFAULT_SOURCE -I/usr/include -I/usr/local/include -I/usr/include/gtk-3.0 -I/usr/include/glib-2.0 -I/usr/lib/glib-2.0/include -I/usr/include/pango-1.0 -I/usr/include/cairo -I/usr/include/harfbuzz -I/usr/include/gdk-pixbuf-2.0 -I/usr/include/atk-1.0 -Wall -pedantic -std=c99 -O2
 GTK_CFLAGS:= $(shell pkg-config --cflags gtk+-3.0 2>/dev/null)
 GTK_LDFLAGS:= $(shell pkg-config --libs gtk+-3.0 2>/dev/null)
-LDFLAGS= -L/usr/local/lib -lxmlrpc_client -lxmlrpc -lxmlrpc_util -lcurl
+LDFLAGS= -L/usr/lib -L/usr/local/lib -lxmlrpc_client -lxmlrpc -lxmlrpc_util -lcurl
 PREFIX=	/usr/local
 
 all: clean gtkjj
