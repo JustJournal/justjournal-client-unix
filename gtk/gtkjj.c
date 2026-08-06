@@ -34,6 +34,19 @@ SUCH DAMAGE.
 #include <xmlrpc-c/base.h>
 #include <xmlrpc-c/client.h>
 
+/* Portable secure memory zeroing */
+#include <strings.h>
+#if defined(HAVE_EXPLICIT_BZERO)
+#define secure_bzero explicit_bzero
+#else
+/* Fallback for platforms without explicit_bzero (e.g., musl, older glibc, macOS) */
+static inline void secure_bzero(void *s, size_t n) {
+    memset(s, 0, n);
+    /* Compiler barrier to prevent optimization */
+    __asm__ __volatile__("" : : "r"(s), "r"(n) : "memory");
+}
+#endif
+
 #define NAME "JustJournal/GTK"
 #define VERSION "2.0.2"
 
@@ -165,7 +178,7 @@ static void button_clicked( GtkButton *button, GtkWindow *parent )
     if ( env.fault_occurred )
     {
         if (env.fault_code == -501)
-            asprintf( &errmsg, "ERROR:  Your account info %s",
+            asprintf( &errmsg, "ERROR: Your account info %s",
                              "might be incorrect.\n" );
         else
             asprintf( &errmsg, "XML-RPC Fault: %s (%d)\n",
@@ -174,17 +187,30 @@ static void button_clicked( GtkButton *button, GtkWindow *parent )
         free(errmsg);
         goto cleanup;
     }
-    xmlrpc_read_string( &env, resultP, &postResult ); // do we need this?
+    if (!resultP)
+    {
+        asprintf(&errmsg, "ERROR: No response from server\n");
+        msgbox(parent, errmsg);
+        free(errmsg);
+        goto cleanup;
+    }
+
+    xmlrpc_read_string( &env, resultP, &postResult );
     if ( env.fault_occurred )
     {
         if (env.fault_code == -501)
-            asprintf( &errmsg, "ERROR:  Your account info %s",
+            asprintf( &errmsg, "ERROR: Your account info %s",
                              "might be incorrect.\n" );
         else
             asprintf( &errmsg, "XML-RPC Fault: %s (%d)\n",
                 env.fault_string, env.fault_code );
         msgbox( parent, errmsg);
         free(errmsg);
+        goto cleanup;
+    }
+    else
+    {
+        free((char *)postResult);
     }
     /* if we get here it worked.  Clear the entry data */
     gtk_entry_set_text( GTK_ENTRY (user), "" );
@@ -192,6 +218,7 @@ static void button_clicked( GtkButton *button, GtkWindow *parent )
     gtk_text_buffer_set_text (buffer, "", -1);
 
 cleanup:
+    secure_bzero(c, strlen(c));
     g_free(c);
     xmlrpc_DECREF( resultP );
     xmlrpc_env_clean( &env );
@@ -222,7 +249,6 @@ static void msgbox( GtkWindow * parent, char * msg )
     gtk_box_pack_start_defaults (GTK_BOX (gtk_dialog_get_content_area (GTK_DIALOG (dialog))), hbox);
     gtk_widget_show_all (dialog);
 
-    /* Call gtk_widget_destroy() when the dialog emits the response signal. */
     g_signal_connect (G_OBJECT (dialog), "response",
                     G_CALLBACK (gtk_widget_destroy), NULL);
 }
@@ -233,7 +259,6 @@ cut_clicked (GtkButton *cut,
              GtkTextView *textview)
 {
     GtkClipboard *clipboard = gtk_clipboard_get (GDK_SELECTION_CLIPBOARD);
-    //GtkTextBuffer *buffer2 = gtk_text_view_get_buffer (textview);
 
     gtk_text_buffer_cut_clipboard (buffer, clipboard, TRUE);
 }
@@ -254,7 +279,6 @@ paste_clicked (GtkButton *paste,
                GtkTextView *textview)
 {
     GtkClipboard *clipboard = gtk_clipboard_get (GDK_SELECTION_CLIPBOARD);
-    //GtkTextBuffer *buffer2 = gtk_text_view_get_buffer (textview);
 
     gtk_text_buffer_paste_clipboard (buffer, clipboard, NULL, TRUE);
 }
