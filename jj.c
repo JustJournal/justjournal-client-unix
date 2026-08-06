@@ -42,6 +42,7 @@ SUCH DAMAGE.
 #include <limits.h>
 #include <ctype.h>
 #include <netdb.h>
+#include <sys/socket.h>
 #include <regex.h>
 
 #include <xmlrpc-c/base.h>
