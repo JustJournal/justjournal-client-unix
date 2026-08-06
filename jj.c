@@ -43,19 +43,16 @@ SUCH DAMAGE.
 #include <xmlrpc-c/client.h>
 
 /* Portable secure memory zeroing */
-#if defined(__APPLE__)
-/* macOS doesn't have explicit_bzero, provide fallback */
-static inline void secure_bzero(void *s, size_t n) {
-    volatile unsigned char *p = (volatile unsigned char *)s;
-    while (n--) {
-        *p++ = 0;
-    }
-    /* Compiler barrier to prevent optimization */
-    __asm__ __volatile__("" : : "r"(p) : "memory");
-}
-#else
 #include <strings.h>
+#if defined(HAVE_EXPLICIT_BZERO)
 #define secure_bzero explicit_bzero
+#else
+/* Fallback for platforms without explicit_bzero (e.g., musl, older glibc, macOS) */
+static inline void secure_bzero(void *s, size_t n) {
+    memset(s, 0, n);
+    /* Compiler barrier to prevent optimization */
+    __asm__ __volatile__("" : : "r"(s), "r"(n) : "memory");
+}
 #endif
 
 #define NAME "JustJournal/UNIX"
