@@ -32,7 +32,6 @@ SUCH DAMAGE.
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-#include <stdbool.h>
 #include <unistd.h>
 #include <errno.h>
 #include <limits.h>
@@ -65,7 +64,7 @@ static void getRecentPosts(const char *host, const char *username, const char *p
 static bool is_valid_hostname(const char *hostname);
 static bool is_valid_username(const char *input);
 static bool is_valid_password(const char *input);
-static void clear_sensitive_data(const void *data, size_t len);
+static void clear_sensitive_data(void *data, size_t len);
 
 int main(int argc, char *argv[])
 {
@@ -239,13 +238,13 @@ int main(int argc, char *argv[])
                                  password, /* journal password */
                                  entry,    /* blog content */
                                  true);    /* post now */
-    clear_sensitive_data(password, sizeof(password));
+    clear_sensitive_data((void *)password, sizeof(password));
     die_if_fault_occurred(&env);
 
     xmlrpc_read_string(&env, resultP, &postResult);
+    die_if_fault_occurred(&env);
     if (debug && postResult != NULL)
         fprintf(stderr, "Debug: post result is: %s\n", postResult);
-    die_if_fault_occurred(&env);
     free((char *)postResult);
 
     xmlrpc_DECREF(resultP);
@@ -298,7 +297,7 @@ static void getRecentPosts(const char *host, const char *username, const char *p
                                  username,           /* journal username */
                                  password,           /* journal password */
                                  RECENT_POST_COUNT); /* post count */
-    clear_sensitive_data(password, sizeof(password));
+    clear_sensitive_data((void *)password, sizeof(password));
     die_if_fault_occurred(&env);
 
     arrsize = xmlrpc_array_size(&env, resultP);
@@ -307,30 +306,40 @@ static void getRecentPosts(const char *host, const char *username, const char *p
 
     for (int i = 0; i < arrsize; i++)
     {
+        firstElementP = NULL;
+        varP = NULL;
+        
         xmlrpc_array_read_item(&env, resultP, i, &firstElementP);
+        die_if_fault_occurred(&env);
+
         xmlrpc_struct_find_value(&env, firstElementP, "title", &varP);
+        die_if_fault_occurred(&env);
         if (varP)
         {
             xmlrpc_read_string(&env, varP, &postResult);
+            die_if_fault_occurred(&env);
             printf("%d %s\n\n", i, postResult);
             free((char *)postResult);
             postResult = NULL;
             xmlrpc_DECREF(varP);
+            varP = NULL;
         }
-        die_if_fault_occurred(&env);
 
         xmlrpc_struct_find_value(&env, firstElementP, "content", &varP);
+        die_if_fault_occurred(&env);
         if (varP)
         {
             xmlrpc_read_string(&env, varP, &postResult);
+            die_if_fault_occurred(&env);
             printf("%s\n\n", postResult);
             free((char *)postResult);
             postResult = NULL;
             xmlrpc_DECREF(varP);
+            varP = NULL;
         }
-        die_if_fault_occurred(&env);
 
         xmlrpc_DECREF(firstElementP);
+        firstElementP = NULL;
     }
     xmlrpc_DECREF(resultP);
     xmlrpc_env_clean(&env);
@@ -416,7 +425,7 @@ static bool is_valid_hostname(const char *hostname) {
     return true;
 }
 
-static void clear_sensitive_data(const void *data, size_t len) {
+static void clear_sensitive_data(void *data, size_t len) {
     volatile unsigned char *p = (volatile unsigned char *)data;
     while (len--) {
         *p++ = 0;
