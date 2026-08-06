@@ -2,9 +2,9 @@
 # gtkjj: Just Journal for GTK
 CC?=cc
 CFLAGS= -D_DEFAULT_SOURCE -I/usr/local/include -Wall -pedantic -std=c99 -O2
-GTK_CFLAGS:= $(shell pkg-config --cflags gtk+-3.0 xmlrpc xmlrpc_client 2>/dev/null)
-GTK_LDFLAGS:= $(shell pkg-config --libs gtk+-3.0 xmlrpc xmlrpc_client 2>/dev/null)
-LDFLAGS= -lcurl
+GTK_CFLAGS:= $(shell pkg-config --cflags gtk+-3.0 2>/dev/null)
+GTK_LDFLAGS:= $(shell pkg-config --libs gtk+-3.0 2>/dev/null)
+LDFLAGS= -L/usr/local/lib -lxmlrpc_client -lxmlrpc -lxmlrpc_util -lcurl
 PREFIX=	/usr/local
 
 all: clean gtkjj
