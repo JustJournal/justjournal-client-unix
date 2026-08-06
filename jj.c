@@ -23,8 +23,13 @@ OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGE.
 */
 
-#if defined(__linux__)
-#define _DEFAULT_SOURCE
+/* For Linux */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+    #if __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 19
+        #define _DEFAULT_SOURCE
+    #else
+        #define _BSD_SOURCE
+    #endif
 #endif
 #define _XOPEN_SOURCE 700
 
