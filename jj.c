@@ -24,8 +24,14 @@ SUCH DAMAGE.
 */
 
 /* For Linux */
-#define _BSD_SOURCE
-#define  _XOPEN_SOURCE
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+    #if __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 19
+        #define _DEFAULT_SOURCE
+    #else
+        #define _BSD_SOURCE
+    #endif
+#endif
+#define _XOPEN_SOURCE 700
 
 #include <stdio.h>
 #include <stdlib.h>
