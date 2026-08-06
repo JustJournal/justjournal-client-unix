@@ -207,15 +207,15 @@ int main(int argc, char *argv[])
     if (debug && hflag)
         fprintf(stderr, "host is set to: %s\n", host);
 
-        if (!is_valid_username(username)) {
-            fprintf(stderr, "Error: Invalid username\n");
-            exit(EXIT_FAILURE);
-        }
-        
-        if (!is_valid_password(password)) {
-            fprintf(stderr, "Error: Invalid password\n");
-            exit(EXIT_FAILURE);
-        }
+    if (!is_valid_username(username)) {
+        fprintf(stderr, "Error: Invalid username\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if (!is_valid_password(password)) {
+        fprintf(stderr, "Error: Invalid password\n");
+        exit(EXIT_FAILURE);
+    }
 
     if (rflag)
     {
