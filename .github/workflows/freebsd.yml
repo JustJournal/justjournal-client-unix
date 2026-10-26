@@ -29,6 +29,6 @@ jobs:
           envs: |
             PKG_DISABLE_AUTOUPDATE=1
             ASSUME_ALWAYS_YES=1
-          prepare: pkg install -y xmlrpc-c 2>/dev/null || true
+          prepare: pkg install -y pkgconf curl jansson
           run: |
             make
