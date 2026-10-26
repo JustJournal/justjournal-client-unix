@@ -62,13 +62,39 @@ CMake wrappers and place `jjclient` in the repository root.
 
 ### Using the software
 
-jjclient -u username -p password
+```sh
+jjclient -u username
+```
 
-Supply your username and password.  After starting the software,
-type your blog entry and use control + D and then return to end. (EOF)
+The client prompts for your password without echoing it on the controlling
+terminal (`/dev/tty`). Then type your blog entry and use control + D to end
+the input (EOF). If no controlling terminal is available, supply a password
+using one of the options below.
 
-Alternatively, you may use a text file like this:
-jjclient -u username -p password < myfile.txt
+Redirected standard input remains available for the entry body:
+
+```sh
+jjclient -u username -s 'My title' < entry.txt
+```
+
+For automation, read the password from a separate file descriptor:
+
+```sh
+jjclient -u username --password-fd 3 < entry.txt 3< protected-password-file
+```
+
+Use a password file readable only by the intended user. `--password-fd FD`
+(also `--password-fd=FD`) reads the first line, or through EOF if there is no
+newline. A trailing carriage return is removed for CRLF input; other spaces
+are preserved. Passwords must contain 6–30 bytes. Invalid descriptors and
+invalid or oversized passwords are rejected. Descriptor 0 is supported: its
+first line is the password and the remaining standard input is the entry body.
+A separate descriptor keeps the body input untouched.
+
+The existing `-p password` option remains supported for compatibility, but
+can expose the password through process arguments and shell history. Prefer
+the terminal prompt or `--password-fd`; `-p` and `--password-fd` cannot be
+combined. Password input through environment variables is not supported.
 
 Other flags include -s for subject, -d for debug messages, and -r to list
 the latest 15 entries (including private entries and drafts for your account).

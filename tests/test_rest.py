@@ -5,15 +5,22 @@ The compiled harness routes HTTPS to localhost and trusts only the test CA.
 No production URLs, credentials, or TLS options are changed in the clients.
 """
 import http.server
+import fcntl
 import json
 import os
 from pathlib import Path
+import pty
+import select
 import shlex
 import shutil
+import signal
 import ssl
 import subprocess
+import sys
 import tempfile
+import termios
 import threading
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -132,7 +139,8 @@ static jj_rest *test_open(const char *base, const char *agent, char *error, size
 #define jj_rest_open test_open
 '''.replace("PORT", str(cls.server.server_port)).replace("CERT", str(cert))
         cls.cli = cls.work / "jjclient"
-        cls.build("cli.c", shim + '\n#include "jj.c"\n', cls.cli, ["libcurl", "jansson"])
+        cls.build("cli.c", shim + '\n#include "jj.c"\n', cls.cli,
+                  ["libcurl", "jansson"], [ROOT / "jj_password.c"])
         cls.gtk = None
         cls.xvfb = None
         cls.gui_env = os.environ.copy()
@@ -198,11 +206,11 @@ int main(int argc, char **argv)
 ''', cls.gtk, ["gtk+-3.0", "libcurl", "jansson"])
 
     @classmethod
-    def build(cls, source, text, target, packages):
+    def build(cls, source, text, target, packages, extra_sources=()):
         path = cls.work / source
         path.write_text(text)
         flags = shlex.split(subprocess.check_output(["pkg-config", "--cflags", "--libs", *packages], text=True))
-        subprocess.run([*shlex.split(os.environ.get("CC", "cc")), "-std=c99", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-Wno-unused-parameter", "-pedantic", "-I", str(ROOT), str(path), "-o", str(target), *flags], check=True)
+        subprocess.run([*shlex.split(os.environ.get("CC", "cc")), "-std=c99", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-Wno-unused-parameter", "-pedantic", "-I", str(ROOT), str(path), *map(str, extra_sources), "-o", str(target), *flags], check=True)
 
     @classmethod
     def tearDownClass(cls):
@@ -223,6 +231,192 @@ int main(int argc, char **argv)
         self.assertEqual(result.returncode == 0, ok, result.stderr)
         self.assertNotIn("testpass", result.stdout + result.stderr)
         return result
+
+    def password_fd_run(self, password, equals=False, extra_args=()):
+        read_fd, write_fd = os.pipe()
+        try:
+            os.write(write_fd, password)
+            os.close(write_fd)
+            write_fd = None
+            option = (["--password-fd=" + str(read_fd)] if equals else
+                      ["--password-fd", str(read_fd)])
+            return subprocess.run(
+                [str(self.cli), "-u", "testuser", *option, *extra_args],
+                input=b"Separate body\n", capture_output=True,
+                pass_fds=(read_fd,), timeout=10)
+        finally:
+            os.close(read_fd)
+            if write_fd is not None:
+                os.close(write_fd)
+
+    def start_prompt(self):
+        master, slave = pty.openpty()
+        echo_read, echo_write = os.pipe()
+        attrs = termios.tcgetattr(slave)
+        attrs[3] |= termios.ECHO
+        termios.tcsetattr(slave, termios.TCSANOW, attrs)
+
+        def controlling_terminal():
+            os.setsid()
+            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+        # BSD revokes the slave when its session leader exits. Keep a supervisor
+        # in that session so it can inspect the real CLI child's terminal state
+        # after child exit, before revocation. Forward signals to the CLI only.
+        supervisor = '''
+import os, signal, subprocess, sys, termios
+child = subprocess.Popen(sys.argv[3:])
+def forward(signum, frame):
+    child.send_signal(signum)
+signal.signal(signal.SIGINT, forward)
+signal.signal(signal.SIGTERM, forward)
+status = child.wait()
+echo = bool(termios.tcgetattr(int(sys.argv[1]))[3] & termios.ECHO)
+os.write(int(sys.argv[2]), b"1" if echo else b"0")
+sys.exit(status if status >= 0 else 128 - status)
+'''
+        try:
+            process = subprocess.Popen(
+                [sys.executable, "-c", supervisor, str(slave), str(echo_write),
+                 str(self.cli), "-u", "testuser"], stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                pass_fds=(slave, echo_write), preexec_fn=controlling_terminal)
+        except BaseException:
+            os.close(master)
+            os.close(slave)
+            os.close(echo_read)
+            os.close(echo_write)
+            raise
+        os.close(echo_write)
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        self.addCleanup(os.close, echo_read)
+
+        def stop_process():
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=5)
+
+        self.addCleanup(stop_process)
+        output = b""
+        deadline = time.monotonic() + 5
+        while b"Password:" not in output:
+            remaining = deadline - time.monotonic()
+            self.assertGreater(remaining, 0, "Password prompt did not appear")
+            ready, _, _ = select.select([master], [], [], remaining)
+            self.assertTrue(ready, "Password prompt did not appear")
+            output += os.read(master, 4096)
+        self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
+        return process, master, echo_read, output
+
+    @staticmethod
+    def drain_terminal(master):
+        output = b""
+        while select.select([master], [], [], 0)[0]:
+            try:
+                chunk = os.read(master, 4096)
+            except OSError as error:
+                # A revoked PTY may report EIO/ENXIO instead of EOF on BSD/Linux.
+                import errno
+                if error.errno in (errno.EIO, errno.ENXIO):
+                    break
+                raise
+            if not chunk:
+                break
+            output += chunk
+        return output
+
+    def test_password_fd_sources_preserve_password_and_body(self):
+        for password, expected, equals in (
+            (b"testpass\n", "testpass", False),
+            (b" test pass \r\n", " test pass ", True),
+            (b"testpass", "testpass", True),
+            (b"a" * 30 + b"\r\n", "a" * 30, False),
+        ):
+            with self.subTest(password=password, equals=equals):
+                type(self).requests = []
+                result = self.password_fd_run(password, equals)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.requests[0][2]["password"], expected)
+                self.assertEqual(self.requests[-1][2]["body"], "Separate body\n")
+                self.assertNotIn(expected.encode(), result.stdout + result.stderr)
+
+    def test_password_fd_zero_preserves_following_entry(self):
+        result = subprocess.run(
+            [str(self.cli), "-u", "testuser", "--password-fd", "0"],
+            input=b"testpass\nBody from same descriptor\n", capture_output=True,
+            timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.requests[0][2]["password"], "testpass")
+        self.assertEqual(self.requests[-1][2]["body"], "Body from same descriptor\n")
+
+    def test_password_fd_rejects_invalid_password_without_requests(self):
+        for password in (b"", b"short\n", b"a" * 31 + b"\n",
+                         b"test\x00pass\n", b"test:pass\n"):
+            with self.subTest(password=password):
+                result = self.password_fd_run(password)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(b"password", result.stderr.lower())
+                self.assertEqual(self.requests, [])
+
+    def test_password_source_option_errors_do_not_read_stdin(self):
+        cases = (
+            ["--password-fd"], ["--password-fd="],
+            ["--password-fd", "-1"], ["--password-fd", "abc"],
+            ["--password-fd", "3junk"],
+            ["--password-fd", "9999999999999999999999999"],
+            ["--password-fd", "999999"],
+            ["-p", "testpass", "--password-fd", "0"],
+            ["--password-fd", "0", "-p", "testpass"],
+        )
+        for args in cases:
+            with self.subTest(args=args), tempfile.TemporaryFile() as body:
+                body.write(b"testpass\nEntry body")
+                body.seek(0)
+                result = subprocess.run(
+                    [str(self.cli), "-u", "testuser", *args], stdin=body,
+                    capture_output=True, timeout=5, start_new_session=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(result.stderr)
+                self.assertNotIn(b"testpass", result.stdout + result.stderr)
+                self.assertEqual(body.tell(), 0)
+                self.assertEqual(self.requests, [])
+
+    def test_missing_terminal_does_not_read_stdin(self):
+        with tempfile.TemporaryFile() as body:
+            body.write(b"Entry body")
+            body.seek(0)
+            result = subprocess.run(
+                [str(self.cli), "-u", "testuser"], stdin=body,
+                capture_output=True, timeout=5, start_new_session=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"password", result.stderr.lower())
+            self.assertEqual(body.tell(), 0)
+            self.assertEqual(self.requests, [])
+
+    def test_terminal_password_is_hidden_and_restores_echo(self):
+        process, master, echo_read, terminal_output = self.start_prompt()
+        os.write(master, b"testpass\n")
+        stdout, stderr = process.communicate(b"Redirected entry body\n", timeout=10)
+        self.assertEqual(process.returncode, 0, stderr)
+        self.assertEqual(os.read(echo_read, 1), b"1", "Terminal echo was not restored")
+        terminal_output += self.drain_terminal(master)
+        self.assertNotIn(b"testpass", terminal_output + stdout + stderr)
+        self.assertEqual(self.requests[0][2]["password"], "testpass")
+        self.assertEqual(self.requests[-1][2]["body"], "Redirected entry body\n")
+
+    def test_terminal_signals_restore_echo_without_requests(self):
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signal=signum):
+                process, master, echo_read, terminal_output = self.start_prompt()
+                os.write(master, b"partialpass")
+                process.send_signal(signum)
+                stdout, stderr = process.communicate(timeout=5)
+                self.assertNotEqual(process.returncode, 0)
+                self.assertEqual(os.read(echo_read, 1), b"1", "Terminal echo was not restored")
+                terminal_output += self.drain_terminal(master)
+                self.assertNotIn(b"partialpass", terminal_output + stdout + stderr)
+                self.assertEqual(self.requests, [])
 
     def test_post_json_and_defaults(self):
         self.cli_run("-s", 'Subject "quoted" \\ 雪', "-d", body='body "quote" \\ \n\t雪')

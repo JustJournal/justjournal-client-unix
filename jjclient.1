@@ -36,13 +36,20 @@
 .Op Fl h Ar hostname
 .Op Fl u Ar username
 .Op Fl p Ar password
+.Op Fl -password-fd Ar fd
 .Op Fl s Ar subject
 .Sh DESCRIPTION
 The
 .Nm
 utility creates blog entries on Just Journal based websites.
 .Pp
-Username and password must be set.  If the hostname is not specified,
+The username must be set.
+If neither password option is supplied, the password is read without echo
+from the controlling terminal
+.Pa /dev/tty .
+This preserves standard input for the entry body.
+If no controlling terminal is available, a password option is required.
+If the hostname is not specified,
 .Nm
 will use the www.justjournal.com site.
 .Pp
@@ -67,10 +74,43 @@ entries and drafts, instead of reading an entry from standard input.
 Specify the host to connect to.
 .It Fl u
 Specify the username to use while connecting.
-.It Fl p
+.It Fl p Ar password
 Define the password used while authenticating.
+This compatibility option can expose the password through process arguments
+and shell history; prefer the terminal prompt or
+.Fl -password-fd .
+.It Fl -password-fd Ar fd
+Read the password from the first line of file descriptor
+.Ar fd ,
+or through EOF if no newline is present.
+The form
+.Fl -password-fd Ns = Ns Ar fd
+is also accepted.
+A trailing carriage return is removed for CRLF input;
+other spaces are preserved.
+Passwords must contain 6 to 30 bytes.
+Invalid descriptors and invalid or oversized passwords are rejected.
+Descriptor 0 is supported: the first line is the password and the remaining
+standard input is the entry body.
+Use a separate descriptor to keep body input untouched.
+This option and
+.Fl p
+are mutually exclusive.
 .It Fl s
 Set the subject (title) of the blog entry.
+.El
+.Pp
+Password input through environment variables is not supported.
+.Sh EXAMPLES
+Prompt for a password while reading the entry from a file:
+.Bd -literal -offset indent
+jjclient -u username -s 'My title' < entry.txt
+.Ed
+.Pp
+Read a password from a file readable only by the intended user:
+.Bd -literal -offset indent
+jjclient -u username --password-fd 3 < entry.txt 3< protected-password-file
+.Ed
 .Sh AUTHORS
 The
 .Nm 

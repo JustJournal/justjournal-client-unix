@@ -38,6 +38,7 @@ SUCH DAMAGE.
 #include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
+#include <getopt.h>
 #include <errno.h>
 #include <limits.h>
 #include <ctype.h>
@@ -46,6 +47,7 @@ SUCH DAMAGE.
 #include <regex.h>
 
 #include "jj_rest.h"
+#include "jj_password.h"
 
 /* Portable secure memory zeroing */
 #include <strings.h>
@@ -82,6 +84,25 @@ static bool is_valid_hostname(const char *hostname);
 static bool is_valid_username(const char *input);
 static bool is_valid_password(const char *input);
 
+static bool parse_password_fd(const char *input, int *fd)
+{
+    const char *p;
+    char *end;
+    long value;
+
+    if (!input || !*input)
+        return false;
+    for (p = input; *p; p++)
+        if (*p < '0' || *p > '9')
+            return false;
+    errno = 0;
+    value = strtol(input, &end, 10);
+    if (errno || *end || value > INT_MAX)
+        return false;
+    *fd = (int)value;
+    return true;
+}
+
 int main(int argc, char *argv[])
 {
     jj_rest *client;
@@ -99,14 +120,26 @@ int main(int argc, char *argv[])
     bool uflag = false;
     bool pflag = false;
     bool rflag = false;
+    bool fdflag = false;
+    int password_fd = -1;
+    static const struct option options[] = {
+        {"password-fd", required_argument, NULL, 256},
+        {NULL, 0, NULL, 0}
+    };
 
-    if (argc < 3)
-        usage(argv[0]);
-
-    while ((c = getopt(argc, argv, "h:u:p:s:dr")) != -1)
+    while ((c = getopt_long(argc, argv, "h:u:p:s:dr", options, NULL)) != -1)
     {
         switch (c)
         {
+        case 256:
+            if (!parse_password_fd(optarg, &password_fd)) {
+                fprintf(stderr, "Error: Invalid password descriptor\n");
+                secure_bzero(password, sizeof(password));
+                return EXIT_FAILURE;
+            }
+            fdflag = true;
+            break;
+
         case 'h': /* host */
             if (optarg == NULL)
             {
@@ -192,9 +225,16 @@ int main(int argc, char *argv[])
     }
     argc -= optind;
 
-    if (!uflag || !pflag)
+    if (pflag && fdflag) {
+        fprintf(stderr, "Error: -p and --password-fd are mutually exclusive\n");
+        secure_bzero(password, sizeof(password));
+        return EXIT_FAILURE;
+    }
+
+    if (!uflag)
     {
-        fprintf(stderr, "Username and password are required.\n");
+        fprintf(stderr, "Username is required.\n");
+        secure_bzero(password, sizeof(password));
         usage(argv[0]);
     }
 
@@ -207,12 +247,28 @@ int main(int argc, char *argv[])
 
     if (!is_valid_username(username)) {
         fprintf(stderr, "Error: Invalid username\n");
-        exit(EXIT_FAILURE);
+        secure_bzero(password, sizeof(password));
+        return EXIT_FAILURE;
     }
-    
+
+    if (fdflag) {
+        if (!jj_read_password_fd(password_fd, password, sizeof(password))) {
+            fprintf(stderr, "Error: Cannot read password from descriptor\n");
+            secure_bzero(password, sizeof(password));
+            return EXIT_FAILURE;
+        }
+    } else if (!pflag) {
+        if (!jj_prompt_password(password, sizeof(password), error, sizeof(error))) {
+            fprintf(stderr, "Error: %s\n", error);
+            secure_bzero(password, sizeof(password));
+            return EXIT_FAILURE;
+        }
+    }
+
     if (!is_valid_password(password)) {
         fprintf(stderr, "Error: Invalid password\n");
-        exit(EXIT_FAILURE);
+        secure_bzero(password, sizeof(password));
+        return EXIT_FAILURE;
     }
 
     if (rflag)
@@ -241,7 +297,8 @@ int main(int argc, char *argv[])
     if (i == 0)
     {
         fprintf(stderr, "No entry specified.");
-        exit(EXIT_FAILURE);
+        secure_bzero(password, sizeof(password));
+        return EXIT_FAILURE;
     }
 
     if ((i == ENTRY_MAX - 1 && getchar() != EOF) || ferror(stdin))
@@ -266,7 +323,8 @@ int main(int argc, char *argv[])
 
 static void usage(const char *name)
 {
-    fprintf(stderr, "jjclient %s\nusage: %s -u USERNAME -p PASSWORD [-h host] [-s subject] [-r] [-d]\n", VERSION, name);
+    fprintf(stderr, "jjclient %s\nusage: %s -u USERNAME [-p PASSWORD | --password-fd FD] [-h host] [-s subject] [-r] [-d]\n"
+        "Without a password option, prompt on the controlling terminal with echo disabled.\n", VERSION, name);
     exit(EXIT_FAILURE);
 }
 

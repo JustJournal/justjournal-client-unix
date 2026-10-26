@@ -25,7 +25,7 @@ add_library(jj_rest STATIC jj_rest.c)
 target_link_libraries(jj_rest PUBLIC PkgConfig::REST)
 target_compile_options(jj_rest PRIVATE -Wall -pedantic)
 
-add_executable(jjclient jj.c)
+add_executable(jjclient jj.c jj_password.c)
 target_link_libraries(jjclient PRIVATE jj_rest)
 target_compile_options(jjclient PRIVATE -Wall -pedantic)
 
