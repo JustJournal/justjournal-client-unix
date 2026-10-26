@@ -84,6 +84,61 @@ static bool is_valid_hostname(const char *hostname);
 static bool is_valid_username(const char *input);
 static bool is_valid_password(const char *input);
 
+/* ISO 8601 timestamps with seconds, optional milliseconds and an explicit zone.
+ * Validate directly rather than depending on nonportable timegm/strptime rules. */
+static bool is_valid_entry_date(const char *input)
+{
+    static const int month_days[] = {31, 28, 31, 30, 31, 30,
+        31, 31, 30, 31, 30, 31};
+    size_t i, zone = 19, fraction;
+    int year, month, day, days;
+
+    if (strlen(input) < 20)
+        return false;
+    for (i = 0; i < 19; ++i) {
+        if (i == 4 || i == 7) {
+            if (input[i] != '-') return false;
+        } else if (i == 10) {
+            if (input[i] != 'T') return false;
+        } else if (i == 13 || i == 16) {
+            if (input[i] != ':') return false;
+        } else if (input[i] < '0' || input[i] > '9') {
+            return false;
+        }
+    }
+    year = (input[0] - '0') * 1000 + (input[1] - '0') * 100 +
+        (input[2] - '0') * 10 + input[3] - '0';
+    month = (input[5] - '0') * 10 + input[6] - '0';
+    day = (input[8] - '0') * 10 + input[9] - '0';
+    if (!year || month < 1 || month > 12)
+        return false;
+    days = month_days[month - 1];
+    if (month == 2 && year % 4 == 0 && (year % 100 != 0 || year % 400 == 0))
+        ++days;
+    if (day < 1 || day > days ||
+        (input[11] - '0') * 10 + input[12] - '0' > 23 ||
+        (input[14] - '0') * 10 + input[15] - '0' > 59 ||
+        (input[17] - '0') * 10 + input[18] - '0' > 59)
+        return false;
+    if (input[zone] == '.') {
+        fraction = ++zone;
+        while (input[zone] >= '0' && input[zone] <= '9')
+            ++zone;
+        if (zone - fraction < 1 || zone - fraction > 3)
+            return false;
+    }
+    if (input[zone] == 'Z')
+        return input[zone + 1] == '\0';
+    if ((input[zone] != '+' && input[zone] != '-') || strlen(input + zone) != 6 ||
+        input[zone + 3] != ':')
+        return false;
+    for (i = 1; i < 6; ++i)
+        if (i != 3 && (input[zone + i] < '0' || input[zone + i] > '9'))
+            return false;
+    return (input[zone + 1] - '0') * 10 + input[zone + 2] - '0' <= 23 &&
+        (input[zone + 4] - '0') * 10 + input[zone + 5] - '0' <= 59;
+}
+
 static bool parse_password_fd(const char *input, int *fd)
 {
     const char *p;
@@ -122,8 +177,13 @@ int main(int argc, char *argv[])
     bool rflag = false;
     bool fdflag = false;
     int password_fd = -1;
+    jj_entry_options post_options = JJ_ENTRY_OPTIONS_INIT;
+    bool post_option_set = false;
     static const struct option options[] = {
         {"password-fd", required_argument, NULL, 256},
+        {"date", required_argument, NULL, 257},
+        {"security", required_argument, NULL, 258},
+        {"format", required_argument, NULL, 259},
         {NULL, 0, NULL, 0}
     };
 
@@ -131,6 +191,46 @@ int main(int argc, char *argv[])
     {
         switch (c)
         {
+        case 257:
+            if (!is_valid_entry_date(optarg)) {
+                fprintf(stderr, "Error: Date requires a valid ISO 8601 timestamp with timezone\n");
+                secure_bzero(password, sizeof(password));
+                return EXIT_FAILURE;
+            }
+            post_options.date = optarg;
+            post_option_set = true;
+            break;
+
+        case 258:
+            if (strcmp(optarg, "public") == 0)
+                post_options.security = 2;
+            else if (strcmp(optarg, "friends") == 0)
+                post_options.security = 1;
+            else if (strcmp(optarg, "private") == 0)
+                post_options.security = 0;
+            else {
+                fprintf(stderr, "Error: Security must be public, friends or private\n");
+                secure_bzero(password, sizeof(password));
+                return EXIT_FAILURE;
+            }
+            post_option_set = true;
+            break;
+
+        case 259:
+            if (strcmp(optarg, "text") == 0)
+                post_options.format = "TEXT";
+            else if (strcmp(optarg, "markdown") == 0)
+                post_options.format = "MARKDOWN";
+            else if (strcmp(optarg, "html") == 0)
+                post_options.format = "HTML";
+            else {
+                fprintf(stderr, "Error: Format must be text, markdown or html\n");
+                secure_bzero(password, sizeof(password));
+                return EXIT_FAILURE;
+            }
+            post_option_set = true;
+            break;
+
         case 256:
             if (!parse_password_fd(optarg, &password_fd)) {
                 fprintf(stderr, "Error: Invalid password descriptor\n");
@@ -225,6 +325,12 @@ int main(int argc, char *argv[])
     }
     argc -= optind;
 
+    if (rflag && post_option_set) {
+        fprintf(stderr, "Error: --date, --security and --format cannot be used with -r\n");
+        secure_bzero(password, sizeof(password));
+        return EXIT_FAILURE;
+    }
+
     if (pflag && fdflag) {
         fprintf(stderr, "Error: -p and --password-fd are mutually exclusive\n");
         secure_bzero(password, sizeof(password));
@@ -312,7 +418,8 @@ int main(int argc, char *argv[])
     success = client && jj_rest_login(client, username, password, error, sizeof(error));
     secure_bzero(password, sizeof(password));
     if (success)
-        success = jj_rest_post(client, title, entry, NULL, NULL, error, sizeof(error));
+        success = jj_rest_post_with_options(client, title, entry, NULL, NULL,
+            &post_options, error, sizeof(error));
     jj_rest_close(client);
     if (!success)
         fprintf(stderr, "ERROR: %s\n", error);
@@ -324,6 +431,8 @@ int main(int argc, char *argv[])
 static void usage(const char *name)
 {
     fprintf(stderr, "jjclient %s\nusage: %s -u USERNAME [-p PASSWORD | --password-fd FD] [-h host] [-s subject] [-r] [-d]\n"
+        "  [--date YYYY-MM-DDTHH:MM:SS[.sss](Z|+HH:MM|-HH:MM)]\n"
+        "  [--security public|friends|private] [--format text|markdown|html]\n"
         "Without a password option, prompt on the controlling terminal with echo disabled.\n", VERSION, name);
     exit(EXIT_FAILURE);
 }

@@ -38,6 +38,9 @@
 .Op Fl p Ar password
 .Op Fl -password-fd Ar fd
 .Op Fl s Ar subject
+.Op Fl -date Ar timestamp
+.Op Fl -security Ar public|friends|private
+.Op Fl -format Ar text|markdown|html
 .Sh DESCRIPTION
 The
 .Nm
@@ -98,7 +101,36 @@ This option and
 are mutually exclusive.
 .It Fl s
 Set the subject (title) of the blog entry.
+.It Fl -date Ar timestamp
+Set the entry date using an ISO 8601 timestamp with seconds and an explicit
+timezone, for example
+.Li 2026-10-25T14:30:00-04:00
+or
+.Li 2026-10-25T18:30:00Z .
+One to three fractional second digits are optional.
+Calendar dates must be valid, with years from 0001 to 9999.
+If omitted, the server uses the current time.
+.It Fl -security Ar public|friends|private
+Set entry visibility.
+The default is
+.Cm public .
+.It Fl -format Ar text|markdown|html
+Set the body format.
+The default is
+.Cm text .
+Markdown and HTML bodies are sent unchanged for server rendering, with automatic
+line-break formatting disabled.
+Legacy extraction of
+.Li <title>
+and
+.Li <music>
+tags applies only to text mode.
 .El
+.Pp
+The date, security and format options also accept
+.Li --option=value
+and cannot be combined with
+.Fl r .
 .Pp
 Password input through environment variables is not supported.
 .Sh EXAMPLES
@@ -110,6 +142,12 @@ jjclient -u username -s 'My title' < entry.txt
 Read a password from a file readable only by the intended user:
 .Bd -literal -offset indent
 jjclient -u username --password-fd 3 < entry.txt 3< protected-password-file
+.Ed
+.Pp
+Post a private HTML entry with a specified date:
+.Bd -literal -offset indent
+jjclient -u username --security private --format html \e
+    --date '2026-10-25T18:30:00Z' < entry.html
 .Ed
 .Sh AUTHORS
 The

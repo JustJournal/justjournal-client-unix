@@ -98,6 +98,24 @@ combined. Password input through environment variables is not supported.
 
 Other flags include -s for subject, -d for debug messages, and -r to list
 the latest 15 entries (including private entries and drafts for your account).
+
+Posting options:
+
+- `--security public|friends|private` selects visibility (default: `public`).
+- `--format text|markdown|html` selects the body format (default: `text`).
+  Markdown and HTML bodies are sent unchanged for the server to render; legacy
+  `<title>` and `<music>` extraction applies only to text mode.
+- `--date '2026-10-25T14:30:00-04:00'` sets the entry date. Use an ISO 8601
+  timestamp with seconds and an explicit timezone (`Z` or `±HH:MM`), optionally
+  with 1–3 fractional second digits. Omitting it uses the server's current time.
+
+These options also accept `--option=value` and cannot be combined with `-r`.
+For example, post a friends-only Markdown entry with a specified date:
+
+```sh
+jjclient -u username -s 'My title' --security friends --format markdown \
+    --date '2026-10-25T14:30:00-04:00' < entry.md
+```
 Use -h hostname to connect to another compatible HTTPS server.
 Control characters in retrieved entries are displayed as escape sequences;
 newlines, tabs, and normal UTF-8 text remain intact.

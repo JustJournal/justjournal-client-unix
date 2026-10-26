@@ -440,6 +440,106 @@ sys.exit(status if status >= 0 else 128 - status)
                 self.cli_run(ok=False)
                 self.assertEqual(len(self.requests), 1)
 
+    def test_post_security_options(self):
+        for visibility, expected in (("public", 2), ("friends", 1), ("private", 0)):
+            for option in (["--security", visibility], ["--security=" + visibility]):
+                with self.subTest(option=option):
+                    self.cli_run(*option)
+                    self.assertEqual(self.requests[-1][2]["security"], expected)
+
+    def test_post_format_options(self):
+        for format_name in ("text", "markdown", "html"):
+            for option in (["--format", format_name], ["--format=" + format_name]):
+                with self.subTest(option=option):
+                    self.cli_run(*option, body="Body *formatted* <em>text</em>\n")
+                    entry = self.requests[-1][2]
+                    self.assertEqual(entry["format"], format_name.upper())
+                    self.assertIs(entry["autoFormat"], format_name == "text")
+                    self.assertEqual(entry["body"], "Body *formatted* <em>text</em>\n")
+
+    def test_post_date_preserves_iso8601(self):
+        dates = (
+            "2026-10-26T12:34:56Z", "2026-10-26T12:34:56+05:30",
+            "2026-10-26T12:34:56-04:00", "2026-10-26T12:34:56.1Z",
+            "2026-10-26T12:34:56.12+00:00", "2026-10-26T12:34:56.123-00:00",
+            "2000-02-29T00:00:00Z", "2024-02-29T23:59:59Z",
+            "0001-01-01T00:00:00+23:59", "9999-12-31T23:59:59-23:59",
+        )
+        for date in dates:
+            for option in (["--date", date], ["--date=" + date]):
+                with self.subTest(option=option):
+                    self.cli_run(*option)
+                    self.assertEqual(self.requests[-1][2]["date"], date)
+
+    def test_repeated_post_options_use_last_value(self):
+        date = "2024-02-29T12:34:56.123+01:00"
+        self.cli_run("--date", "2026-10-26T00:00:00Z", "--date=" + date,
+                     "--security", "public", "--security=private",
+                     "--format", "text", "--format=markdown")
+        entry = self.requests[-1][2]
+        self.assertEqual(entry["date"], date)
+        self.assertEqual(entry["security"], 0)
+        self.assertEqual(entry["format"], "MARKDOWN")
+        self.assertIs(entry["autoFormat"], False)
+
+    def test_nontext_body_preserves_legacy_markup(self):
+        body = "<title>Literal title</title>Body<music>Literal song</music>\n"
+        for format_name in ("markdown", "html"):
+            for subject_args, expected_subject in (([], ""), (["-s", "Explicit title"], "Explicit title")):
+                with self.subTest(format=format_name, subject=expected_subject):
+                    self.cli_run("--format", format_name, *subject_args, body=body)
+                    entry = self.requests[-1][2]
+                    self.assertEqual(entry["body"], body)
+                    self.assertEqual(entry["subject"], expected_subject)
+                    self.assertEqual(entry["music"], "")
+
+    def test_explicit_text_keeps_legacy_extraction(self):
+        self.cli_run("--format=text", body="<title>Old title</title>Body<music>Song</music>")
+        entry = self.requests[-1][2]
+        self.assertEqual(entry["subject"], "Old title")
+        self.assertEqual(entry["music"], "Song")
+        self.assertEqual(entry["body"], "Body<music>Song</music>")
+
+    def test_post_option_errors_precede_password_and_body_input(self):
+        invalid_dates = (
+            "", "2026-10-26", "2026-10-26T12:34:56", "2026-10-26 12:34:56Z",
+            "2026-10-26t12:34:56z", "0000-01-01T00:00:00Z",
+            "10000-01-01T00:00:00Z", "1900-02-29T00:00:00Z",
+            "2025-02-29T00:00:00Z", "2026-04-31T00:00:00Z",
+            "2026-00-01T00:00:00Z", "2026-13-01T00:00:00Z",
+            "2026-01-00T00:00:00Z", "2026-01-32T00:00:00Z",
+            "2026-10-26T24:00:00Z", "2026-10-26T12:60:00Z",
+            "2026-10-26T12:34:60Z", "2026-10-26T12:34:56.Z",
+            "2026-10-26T12:34:56.1234Z", "2026-10-26T12:34:56,123Z",
+            "2026-10-26T12:34:56+24:00", "2026-10-26T12:34:56-01:60",
+            "2026-10-26T12:34:56+0100", "2026-10-26T12:34:56+01",
+            "2026-10-26T12:34:56Zjunk", "2026-1-01T00:00:00Z",
+        )
+        cases = [["--date=" + date] for date in invalid_dates]
+        cases += [["--security=" + value] for value in ("", "PUBLIC", "0", "unknown")]
+        cases += [["--format=" + value] for value in ("", "HTML", "plain", "unknown")]
+        cases += [[option] for option in ("--date", "--security", "--format")]
+        for option in (["--date=2026-10-26T00:00:00Z"], ["--security=public"], ["--format=text"]):
+            cases += [["-r", *option], [*option, "-r"]]
+        for args in cases:
+            # Password descriptor 0 would consume this file if validation happened late.
+            for password_args in ([], ["--password-fd", "0"]):
+                with self.subTest(args=args, password_args=password_args), tempfile.TemporaryFile() as body:
+                    body.write(b"testpass\nEntry body")
+                    body.seek(0)
+                    result = subprocess.run(
+                        [str(self.cli), "-u", "testuser", *password_args, *args],
+                        stdin=body, capture_output=True, timeout=5, start_new_session=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertTrue(result.stderr)
+                    self.assertTrue(any(name in result.stderr.lower()
+                                        for name in (b"date", b"security", b"format")),
+                                    result.stderr)
+                    self.assertNotIn(b"Password:", result.stdout + result.stderr)
+                    self.assertNotIn(b"testpass", result.stdout + result.stderr)
+                    self.assertEqual(body.tell(), 0)
+                    self.assertEqual(self.requests, [])
+
     def test_post_failures(self):
         for mode in ("post_fail", "post_error", "post_invalid", "post_no_id", "no_cookie"):
             with self.subTest(mode=mode):
@@ -519,6 +619,10 @@ sys.exit(status if status >= 0 else 128 - status)
         self.assertEqual(self.requests[3][2]["body"], "Second body")
         self.assertEqual(self.requests[1][2]["music"], "Artist - Song 雪")
         self.assertEqual(self.requests[1][2]["tags"], ["c", "unix", "gtk", "café"])
+        self.assertEqual(self.requests[1][2]["security"], 2)
+        self.assertEqual(self.requests[1][2]["format"], "TEXT")
+        self.assertIs(self.requests[1][2]["autoFormat"], True)
+        self.assertNotIn("date", self.requests[1][2])
         self.assertEqual(self.requests[3][2]["music"], "Second song")
         self.assertEqual(self.requests[3][2]["tags"], ["later"])
 

@@ -310,9 +310,28 @@ bool jj_rest_login(jj_rest *client, const char *username, const char *password,
 bool jj_rest_post(jj_rest *client, const char *subject, const char *body,
     const char *music, json_t *tags, char *error, size_t error_size)
 {
+    return jj_rest_post_with_options(client, subject, body, music, tags,
+        NULL, error, error_size);
+}
+
+bool jj_rest_post_with_options(jj_rest *client, const char *subject, const char *body,
+    const char *music, json_t *tags, const jj_entry_options *options,
+    char *error, size_t error_size)
+{
     json_t *payload, *result, *id;
     const char *id_text;
+    const jj_entry_options defaults = JJ_ENTRY_OPTIONS_INIT;
     bool ok;
+
+    if (!options)
+        options = &defaults;
+    if (options->security < 0 || options->security > 2 || !options->format ||
+        (strcmp(options->format, "TEXT") != 0 &&
+        strcmp(options->format, "MARKDOWN") != 0 &&
+        strcmp(options->format, "HTML") != 0)) {
+        snprintf(error, error_size, "Invalid entry security or format.");
+        return false;
+    }
 
     /* Match the old Blogger client's public, published, plain text defaults.
      * Send optional values explicitly: EntryTo's explicit constructor does not
@@ -320,12 +339,18 @@ bool jj_rest_post(jj_rest *client, const char *subject, const char *body,
      * tags list causes applyTags() to throw after the entry has been saved.
      */
     payload = json_pack("{s:s,s:s,s:i,s:s,s:b,s:b,s:b,s:b,s:i,s:i,s:s,s:s,s:[]}",
-        "subject", subject, "body", body, "security", 2, "format", "TEXT",
-        "autoFormat", 1, "allowComments", 1, "emailComments", 1,
+        "subject", subject, "body", body, "security", options->security,
+        "format", options->format, "autoFormat", strcmp(options->format, "TEXT") == 0,
+        "allowComments", 1, "emailComments", 1,
         "draft", 0, "mood", 12, "location", 0,
         "music", music ? music : "", "trackback", "", "tags");
     if (!payload) {
         snprintf(error, error_size, "Unable to encode entry as UTF-8 JSON.");
+        return false;
+    }
+    if (options->date && json_object_set_new(payload, "date", json_string(options->date)) != 0) {
+        json_decref(payload);
+        snprintf(error, error_size, "Unable to encode entry date.");
         return false;
     }
     if (tags && (!json_is_array(tags) || json_object_set(payload, "tags", tags) != 0)) {
@@ -333,8 +358,8 @@ bool jj_rest_post(jj_rest *client, const char *subject, const char *body,
         snprintf(error, error_size, "Unable to encode tags.");
         return false;
     }
-    /* Preserve the Blogger convention used to set titles in the GTK editor. */
-    {
+    /* Preserve legacy tag extraction only for plain text bodies. */
+    if (strcmp(options->format, "TEXT") == 0) {
         char *copy = malloc(strlen(body) + 1);
         char *start, *end;
         bool have_subject = subject[0] != '\0';
