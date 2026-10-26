@@ -255,7 +255,7 @@ int main(int argc, char *argv[])
     success = client && jj_rest_login(client, username, password, error, sizeof(error));
     secure_bzero(password, sizeof(password));
     if (success)
-        success = jj_rest_post(client, title, entry, error, sizeof(error));
+        success = jj_rest_post(client, title, entry, NULL, NULL, error, sizeof(error));
     jj_rest_close(client);
     if (!success)
         fprintf(stderr, "ERROR: %s\n", error);

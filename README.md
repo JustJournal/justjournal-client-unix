@@ -73,9 +73,13 @@ Install gtk3 on MidnightBSD/FreeBSD, or libgtk-3-dev on Debian/Ubuntu,
 in addition to the dependencies above.
 
 Run the build commands below from the gtk directory. The optional Title field
-sets the entry subject separately from the body. Failed requests retain the
-title, entry, and login fields so you can correct the problem and retry.
-A successful post clears these fields.
+sets the entry subject separately from the body. Music accepts the current
+artist/song; Tags accepts tags separated by spaces or commas and converts them
+to lowercase, matching the website. Empty tags are ignored.
+
+Failed requests retain all fields so you can correct the problem and retry.
+A successful post clears the title, music, tags, and entry body, keeping your
+username and password filled in for the next post.
 
 ### Available gtkjj packages
 

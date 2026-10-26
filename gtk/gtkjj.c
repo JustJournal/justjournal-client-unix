@@ -49,7 +49,7 @@ static inline void secure_bzero(void *s, size_t n) {
 #define NAME "JustJournal/GTK"
 #define VERSION JJ_VERSION
 
-GtkWidget *user, *pass, *title; /* textboxes */
+GtkWidget *user, *pass, *title, *music, *tags; /* textboxes */
 GtkTextBuffer *buffer;
 
 static void button_clicked (GtkButton *button, GtkWindow *parent);
@@ -65,8 +65,8 @@ void gtk_box_pack_start_defaults(GtkBox *box, GtkWidget *widget)  {
 int main( int argc, char *argv[] )
 {
     GtkWidget *window, *vbox, *authbox, *authbox2, *vauthbox, *hboxccp;
-    GtkWidget *lbluser, *lblpass, *lbltitle; /* labels */
-    GtkWidget *titlebox;
+    GtkWidget *lbluser, *lblpass, *lbltitle, *lblmusic, *lbltags; /* labels */
+    GtkWidget *titlebox, *musicbox, *tagsbox;
     GtkWidget *submit, *cut, *copy, *paste; /* buttons */
     GtkWidget *scrolled_win, *textview = NULL;
 
@@ -120,6 +120,22 @@ int main( int argc, char *argv[] )
     gtk_box_pack_start_defaults(GTK_BOX(titlebox), lbltitle);
     gtk_box_pack_start_defaults(GTK_BOX(titlebox), title);
 
+    lblmusic = gtk_label_new_with_mnemonic("_Music");
+    music = gtk_entry_new();
+    gtk_entry_set_max_length(GTK_ENTRY(music), 125);
+    gtk_label_set_mnemonic_widget(GTK_LABEL(lblmusic), music);
+    musicbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_pack_start_defaults(GTK_BOX(musicbox), lblmusic);
+    gtk_box_pack_start_defaults(GTK_BOX(musicbox), music);
+
+    lbltags = gtk_label_new_with_mnemonic("Ta_gs");
+    tags = gtk_entry_new();
+    gtk_widget_set_tooltip_text(tags, "Separate tags with spaces or commas.");
+    gtk_label_set_mnemonic_widget(GTK_LABEL(lbltags), tags);
+    tagsbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_pack_start_defaults(GTK_BOX(tagsbox), lbltags);
+    gtk_box_pack_start_defaults(GTK_BOX(tagsbox), tags);
+
     /* setup textview */
     textview = gtk_text_view_new();
     buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (textview));
@@ -147,6 +163,8 @@ int main( int argc, char *argv[] )
     gtk_box_pack_start( GTK_BOX (vbox), hboxccp, FALSE, TRUE, 5 );
     gtk_box_pack_start( GTK_BOX (vbox), vauthbox, FALSE, TRUE, 5 );
     gtk_box_pack_start( GTK_BOX (vbox), titlebox, FALSE, TRUE, 5 );
+    gtk_box_pack_start( GTK_BOX (vbox), musicbox, FALSE, TRUE, 5 );
+    gtk_box_pack_start( GTK_BOX (vbox), tagsbox, FALSE, TRUE, 5 );
     gtk_box_pack_start( GTK_BOX (vbox), scrolled_win, TRUE, TRUE, 5 );
     gtk_box_pack_start( GTK_BOX (vbox), submit, FALSE, TRUE, 5 );
 
@@ -157,10 +175,30 @@ int main( int argc, char *argv[] )
     return 0;
 }
 
+/* Match the website's comma/whitespace-separated, lowercase tag input. */
+static json_t *get_tags(void)
+{
+    gchar *normalized = g_utf8_strdown(gtk_entry_get_text(GTK_ENTRY(tags)), -1);
+    gchar **values = g_strsplit_set(normalized, ", \t\r\n\f\v", -1);
+    json_t *result = json_array();
+
+    for (size_t i = 0; result && values[i]; i++) {
+        if (values[i][0] != '\0' &&
+            json_array_append_new(result, json_string(values[i])) != 0) {
+            json_decref(result);
+            result = NULL;
+        }
+    }
+    g_strfreev(values);
+    g_free(normalized);
+    return result;
+}
+
 static void button_clicked( GtkButton *button, GtkWindow *parent )
 {
     jj_rest *client;
-    const gchar *u, *p, *subject;
+    const gchar *u, *p, *subject, *music_text;
+    json_t *tag_list;
     char *c;
     GtkTextIter start, end;
     char error[256];
@@ -170,20 +208,27 @@ static void button_clicked( GtkButton *button, GtkWindow *parent )
     u = gtk_entry_get_text(GTK_ENTRY(user));
     p = gtk_entry_get_text(GTK_ENTRY(pass));
     subject = gtk_entry_get_text(GTK_ENTRY(title));
+    music_text = gtk_entry_get_text(GTK_ENTRY(music));
+    tag_list = get_tags();
+    if (!tag_list) {
+        msgbox(parent, "Unable to encode tags.");
+        return;
+    }
     gtk_text_buffer_get_bounds(buffer, &start, &end);
     c = gtk_text_iter_get_text(&start, &end);
 
     client = jj_rest_open(JJ_BASE_URL, NAME "/" VERSION, error, sizeof(error));
     success = client && jj_rest_login(client, u, p, error, sizeof(error));
     if (success)
-        success = jj_rest_post(client, subject, c, error, sizeof(error));
+        success = jj_rest_post(client, subject, c, music_text, tag_list, error, sizeof(error));
     jj_rest_close(client);
+    json_decref(tag_list);
 
     if (success)
     {
-        gtk_entry_set_text(GTK_ENTRY(user), "");
-        gtk_entry_set_text(GTK_ENTRY(pass), "");
         gtk_entry_set_text(GTK_ENTRY(title), "");
+        gtk_entry_set_text(GTK_ENTRY(music), "");
+        gtk_entry_set_text(GTK_ENTRY(tags), "");
         gtk_text_buffer_set_text(buffer, "", -1);
     }
     else

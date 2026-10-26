@@ -149,26 +149,46 @@ static jj_rest *test_open(const char *base, const char *agent, char *error, size
 int main(int argc, char **argv)
 {
     bool success = strcmp(argv[1], "success") == 0;
-    const char *test_title = argc > 2 ? "" : "GTK title";
+    bool repeat = argc > 2 && strcmp(argv[2], "repeat") == 0;
+    bool empty_metadata = argc > 2 && strcmp(argv[2], "empty-metadata") == 0;
+    const char *test_title = argc > 2 && !repeat && !empty_metadata ? "" : "GTK title";
+    const char *test_music = empty_metadata ? "" : "Artist - Song 雪";
+    const char *test_tags = empty_metadata ? " , ,  " : "C, UNIX  Gtk,, CAFÉ";
     gtk_init(&argc, &argv);
     user = gtk_entry_new();
     pass = gtk_entry_new();
     title = gtk_entry_new();
+    music = gtk_entry_new();
+    tags = gtk_entry_new();
     buffer = gtk_text_buffer_new(NULL);
     gtk_entry_set_text(GTK_ENTRY(user), "testuser");
     gtk_entry_set_text(GTK_ENTRY(pass), "testpass");
-    gtk_entry_set_text(GTK_ENTRY(title), test_title);
-    gtk_text_buffer_set_text(buffer, "GTK body", -1);
-    button_clicked(NULL, NULL);
-    if (success)
-        return gtk_text_buffer_get_char_count(buffer) == 0 &&
-            strlen(gtk_entry_get_text(GTK_ENTRY(title))) == 0 &&
-            strlen(gtk_entry_get_text(GTK_ENTRY(user))) == 0 &&
-            strlen(gtk_entry_get_text(GTK_ENTRY(pass))) == 0 ? 0 : 1;
-    return gtk_text_buffer_get_char_count(buffer) > 0 &&
-        strcmp(gtk_entry_get_text(GTK_ENTRY(title)), test_title) == 0 &&
-        strcmp(gtk_entry_get_text(GTK_ENTRY(user)), "testuser") == 0 &&
-        strcmp(gtk_entry_get_text(GTK_ENTRY(pass)), "testpass") == 0 ? 0 : 1;
+    for (int i = 0; i < (repeat ? 2 : 1); i++) {
+        const char *next_title = i == 0 ? test_title : "Second title";
+        const char *next_music = i == 0 ? test_music : "Second song";
+        const char *next_tags = i == 0 ? test_tags : "Later";
+        gtk_entry_set_text(GTK_ENTRY(title), next_title);
+        gtk_entry_set_text(GTK_ENTRY(music), next_music);
+        gtk_entry_set_text(GTK_ENTRY(tags), next_tags);
+        gtk_text_buffer_set_text(buffer, i == 0 ? "GTK body" : "Second body", -1);
+        button_clicked(NULL, NULL);
+        if (strcmp(gtk_entry_get_text(GTK_ENTRY(user)), "testuser") != 0 ||
+            strcmp(gtk_entry_get_text(GTK_ENTRY(pass)), "testpass") != 0)
+            return 1;
+        if (success) {
+            if (gtk_text_buffer_get_char_count(buffer) != 0 ||
+                strlen(gtk_entry_get_text(GTK_ENTRY(title))) != 0 ||
+                strlen(gtk_entry_get_text(GTK_ENTRY(music))) != 0 ||
+                strlen(gtk_entry_get_text(GTK_ENTRY(tags))) != 0)
+                return 1;
+        } else {
+            return gtk_text_buffer_get_char_count(buffer) > 0 &&
+                strcmp(gtk_entry_get_text(GTK_ENTRY(title)), next_title) == 0 &&
+                strcmp(gtk_entry_get_text(GTK_ENTRY(music)), next_music) == 0 &&
+                strcmp(gtk_entry_get_text(GTK_ENTRY(tags)), next_tags) == 0 ? 0 : 1;
+        }
+    }
+    return 0;
 }
 ''', cls.gtk, ["gtk+-3.0", "libcurl", "jansson"])
 
@@ -275,6 +295,29 @@ int main(int argc, char **argv)
         self.assertEqual(self.requests[-1][2]["music"], "Song")
         self.assertEqual(self.requests[-1][2]["body"], "Body<music>Song</music>")
 
+    def test_gtk_multiple_submissions_keep_credentials(self):
+        if not self.gtk:
+            self.skipTest("GTK 3 and Xvfb are required for GUI callback tests")
+        result = subprocess.run([str(self.gtk), "success", "repeat"], env=self.gui_env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([request[0] for request in self.requests],
+                         ["/api/login", "/api/entry", "/api/login", "/api/entry"])
+        self.assertEqual(self.requests[2][2], {"username": "testuser", "password": "testpass"})
+        self.assertEqual(self.requests[3][2]["subject"], "Second title")
+        self.assertEqual(self.requests[3][2]["body"], "Second body")
+        self.assertEqual(self.requests[1][2]["music"], "Artist - Song 雪")
+        self.assertEqual(self.requests[1][2]["tags"], ["c", "unix", "gtk", "café"])
+        self.assertEqual(self.requests[3][2]["music"], "Second song")
+        self.assertEqual(self.requests[3][2]["tags"], ["later"])
+
+    def test_gtk_empty_music_and_tags(self):
+        if not self.gtk:
+            self.skipTest("GTK 3 and Xvfb are required for GUI callback tests")
+        result = subprocess.run([str(self.gtk), "success", "empty-metadata"], env=self.gui_env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.requests[-1][2]["music"], "")
+        self.assertEqual(self.requests[-1][2]["tags"], [])
+
     def test_gtk_optional_title(self):
         if not self.gtk:
             self.skipTest("GTK 3 and Xvfb are required for GUI callback tests")
@@ -294,6 +337,8 @@ int main(int argc, char **argv)
                 if mode == "ok":
                     self.assertEqual(self.requests[-1][2]["subject"], "GTK title")
                     self.assertEqual(self.requests[-1][2]["body"], "GTK body")
+                    self.assertEqual(self.requests[-1][2]["music"], "Artist - Song 雪")
+                    self.assertEqual(self.requests[-1][2]["tags"], ["c", "unix", "gtk", "café"])
 
 
 if __name__ == "__main__":

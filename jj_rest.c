@@ -205,7 +205,7 @@ bool jj_rest_login(jj_rest *client, const char *username, const char *password,
 }
 
 bool jj_rest_post(jj_rest *client, const char *subject, const char *body,
-    char *error, size_t error_size)
+    const char *music, json_t *tags, char *error, size_t error_size)
 {
     json_t *payload, *result, *id;
     const char *id_text;
@@ -220,9 +220,14 @@ bool jj_rest_post(jj_rest *client, const char *subject, const char *body,
         "subject", subject, "body", body, "security", 2, "format", "TEXT",
         "autoFormat", 1, "allowComments", 1, "emailComments", 1,
         "draft", 0, "mood", 12, "location", 0,
-        "music", "", "trackback", "", "tags");
+        "music", music ? music : "", "trackback", "", "tags");
     if (!payload) {
         snprintf(error, error_size, "Unable to encode entry as UTF-8 JSON.");
+        return false;
+    }
+    if (tags && (!json_is_array(tags) || json_object_set(payload, "tags", tags) != 0)) {
+        json_decref(payload);
+        snprintf(error, error_size, "Unable to encode tags.");
         return false;
     }
     /* Preserve the Blogger convention used to set titles in the GTK editor. */
@@ -265,7 +270,8 @@ bool jj_rest_post(jj_rest *client, const char *subject, const char *body,
         }
         /* Blogger also records the first music tag without removing it. */
         start = copy;
-        while ((start = strstr(start, "<music>")) != NULL) {
+        while ((!music || music[0] == '\0') &&
+            (start = strstr(start, "<music>")) != NULL) {
             end = strstr(start + 7, "</music>");
             if (!end)
                 break;
