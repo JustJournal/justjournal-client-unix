@@ -23,7 +23,7 @@
 .\"
 .\" $Id: jjclient.1,v 1.1 2008/09/27 00:30:40 laffer1 Exp $
 .\"
-.Dd April 12, 2025
+.Dd October 25, 2026
 .Dt JJCLIENT 1
 .Os
 .Sh NAME
@@ -32,6 +32,7 @@
 .Sh SYNOPSIS
 .Nm
 .Op Fl d
+.Op Fl r
 .Op Fl h Ar hostname
 .Op Fl u Ar username
 .Op Fl p Ar password
@@ -48,10 +49,20 @@ will use the www.justjournal.com site.
 As of version 2.0.2, all requests require HTTPS.  Prior versions
 used HTTP which is not secure.
 .Pp
+Version 2.1.0 uses the JSON REST API with session authentication.
+The server must provide /api/login and /api/entry.
+Session cookies are kept in memory and are not saved to disk.
+.Pp
+Input must be UTF-8 and fit within 31,999 bytes.
+Larger entries are rejected.
+.Pp
 The following options are available:
 .Bl -tag -width indent
 .It Fl d
 Debug login and posting problems.
+.It Fl r
+List the latest 15 entries for the authenticated account, including private
+entries and drafts, instead of reading an entry from standard input.
 .It Fl h
 Specify the host to connect to.
 .It Fl u

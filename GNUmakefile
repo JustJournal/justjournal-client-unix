@@ -1,40 +1,37 @@
 # Makefile for jjclient
 
-.POSIX:
-
 CC?=		cc
 
-XMLRPC_C_FLAGS := $(shell pkg-config --cflags xmlrpc xmlrpc_client 2>/dev/null)
-XMLRPC_C_LIBS := $(shell pkg-config --libs xmlrpc xmlrpc_client 2>/dev/null)
-
-ifeq ($(XMLRPC_C_FLAGS),)
-CFLAGS+=	-I/usr/local/include -I${LOCALBASE}/include -I/usr/include
-LDFLAGS+=	-L/usr/local/lib -L${LOCALBASE}/lib -L/usr/lib/x86_64-linux-gnu
-LIBS+=		-lxmlrpc_client -lxmlrpc -lxmlrpc_util
-else
-CFLAGS+=	$(XMLRPC_C_FLAGS)
-LIBS+=		$(XMLRPC_C_LIBS)
-endif
+CFLAGS+= -Wall -pedantic -O2 -std=c99
+REST_CFLAGS := $(shell pkg-config --cflags libcurl jansson)
+REST_LIBS := $(shell pkg-config --libs libcurl jansson)
+CFLAGS+= $(REST_CFLAGS)
+LDLIBS+= $(REST_LIBS)
 
 PREFIX?=	/usr/local
 MANDIR?=	${PREFIX}/share/man
 
-.PHONY: all clean install install-man
+.PHONY: all clean check install install-man
 
-all: clean jjclient
+all: jjclient
 
-jjclient: jj.o
-	${CC} ${CFLAGS} -o jjclient jj.o ${LDFLAGS} ${LIBS}
+jjclient: jj.o jj_rest.o
+	${CC} ${CFLAGS} -o jjclient jj.o jj_rest.o ${LDFLAGS} ${LDLIBS}
 
-jj.o: jj.c
+jj.o: jj.c jj_rest.h
 	${CC} ${CFLAGS} -c jj.c
 
+jj_rest.o: jj_rest.c jj_rest.h
+	${CC} ${CFLAGS} -c jj_rest.c
+
+check:
+	python3 tests/test_rest.py
+
 install: install-man
-	install -o root -g wheel -m 555 jjclient ${DESTDIR}${PREFIX}/bin/jjclient
+	install -m 555 jjclient ${DESTDIR}${PREFIX}/bin/jjclient
 
 install-man:
-	install -o root -g wheel -m 444 jjclient.1 ${DESTDIR}${MANDIR}/man1/
+	install -m 444 jjclient.1 ${DESTDIR}${MANDIR}/man1/
 
 clean:
 	rm -f *.o jjclient
-

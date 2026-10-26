@@ -31,8 +31,7 @@ SUCH DAMAGE.
 #include <stdbool.h>
 #include <string.h>
 
-#include <xmlrpc-c/base.h>
-#include <xmlrpc-c/client.h>
+#include "../jj_rest.h"
 
 /* Portable secure memory zeroing */
 #include <strings.h>
@@ -48,9 +47,9 @@ static inline void secure_bzero(void *s, size_t n) {
 #endif
 
 #define NAME "JustJournal/GTK"
-#define VERSION "2.0.2"
+#define VERSION JJ_VERSION
 
-GtkWidget *user, *pass; /* textboxes */
+GtkWidget *user, *pass, *title; /* textboxes */
 GtkTextBuffer *buffer;
 
 static void button_clicked (GtkButton *button, GtkWindow *parent);
@@ -66,7 +65,8 @@ void gtk_box_pack_start_defaults(GtkBox *box, GtkWidget *widget)  {
 int main( int argc, char *argv[] )
 {
     GtkWidget *window, *vbox, *authbox, *authbox2, *vauthbox, *hboxccp;
-    GtkWidget *lbluser, *lblpass; /* labels */
+    GtkWidget *lbluser, *lblpass, *lbltitle; /* labels */
+    GtkWidget *titlebox;
     GtkWidget *submit, *cut, *copy, *paste; /* buttons */
     GtkWidget *scrolled_win, *textview = NULL;
 
@@ -112,6 +112,14 @@ int main( int argc, char *argv[] )
     gtk_entry_set_visibility( GTK_ENTRY (pass), FALSE );
     gtk_entry_set_invisible_char( GTK_ENTRY (pass), '*' );
 
+    lbltitle = gtk_label_new_with_mnemonic("_Title");
+    title = gtk_entry_new();
+    gtk_entry_set_max_length(GTK_ENTRY(title), 255);
+    gtk_label_set_mnemonic_widget(GTK_LABEL(lbltitle), title);
+    titlebox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_pack_start_defaults(GTK_BOX(titlebox), lbltitle);
+    gtk_box_pack_start_defaults(GTK_BOX(titlebox), title);
+
     /* setup textview */
     textview = gtk_text_view_new();
     buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (textview));
@@ -138,6 +146,7 @@ int main( int argc, char *argv[] )
     vbox = gtk_box_new( GTK_ORIENTATION_VERTICAL, 5 );
     gtk_box_pack_start( GTK_BOX (vbox), hboxccp, FALSE, TRUE, 5 );
     gtk_box_pack_start( GTK_BOX (vbox), vauthbox, FALSE, TRUE, 5 );
+    gtk_box_pack_start( GTK_BOX (vbox), titlebox, FALSE, TRUE, 5 );
     gtk_box_pack_start( GTK_BOX (vbox), scrolled_win, TRUE, TRUE, 5 );
     gtk_box_pack_start( GTK_BOX (vbox), submit, FALSE, TRUE, 5 );
 
@@ -150,79 +159,38 @@ int main( int argc, char *argv[] )
 
 static void button_clicked( GtkButton *button, GtkWindow *parent )
 {
-    xmlrpc_env env;
-    xmlrpc_value * resultP;
-    const char * postResult;
-    const gchar *u, *p; /* username, password */
+    jj_rest *client;
+    const gchar *u, *p, *subject;
     char *c;
     GtkTextIter start, end;
-    char *errmsg = NULL;
+    char error[256];
+    bool success;
 
-    u = gtk_entry_get_text( GTK_ENTRY (user) );
-    p = gtk_entry_get_text( GTK_ENTRY (pass) );
-    gtk_text_buffer_get_bounds (buffer, &start, &end);
-    c = gtk_text_iter_get_text (&start, &end);
+    (void)button;
+    u = gtk_entry_get_text(GTK_ENTRY(user));
+    p = gtk_entry_get_text(GTK_ENTRY(pass));
+    subject = gtk_entry_get_text(GTK_ENTRY(title));
+    gtk_text_buffer_get_bounds(buffer, &start, &end);
+    c = gtk_text_iter_get_text(&start, &end);
 
-    xmlrpc_client_init( XMLRPC_CLIENT_NO_FLAGS, NAME, VERSION );
-    xmlrpc_env_init( &env );
+    client = jj_rest_open(JJ_BASE_URL, NAME "/" VERSION, error, sizeof(error));
+    success = client && jj_rest_login(client, u, p, error, sizeof(error));
+    if (success)
+        success = jj_rest_post(client, subject, c, error, sizeof(error));
+    jj_rest_close(client);
 
-    resultP = xmlrpc_client_call( &env, "https://www.justjournal.com/xml-rpc",
-                                "blogger.newPost",
-                                "(sssssb)", 
-				"", /* key, not used */
-                                u, /* journal unique name */
-				u, /* journal username */
-				p, /* journal password */
-				c, /* blog content */
-				true ); /* post now */
-    if ( env.fault_occurred )
+    if (success)
     {
-        if (env.fault_code == -501)
-            asprintf( &errmsg, "ERROR: Your account info %s",
-                             "might be incorrect.\n" );
-        else
-            asprintf( &errmsg, "XML-RPC Fault: %s (%d)\n",
-                env.fault_string, env.fault_code );
-        msgbox( parent, errmsg );
-        free(errmsg);
-        goto cleanup;
-    }
-    if (!resultP)
-    {
-        asprintf(&errmsg, "ERROR: No response from server\n");
-        msgbox(parent, errmsg);
-        free(errmsg);
-        goto cleanup;
-    }
-
-    xmlrpc_read_string( &env, resultP, &postResult );
-    if ( env.fault_occurred )
-    {
-        if (env.fault_code == -501)
-            asprintf( &errmsg, "ERROR: Your account info %s",
-                             "might be incorrect.\n" );
-        else
-            asprintf( &errmsg, "XML-RPC Fault: %s (%d)\n",
-                env.fault_string, env.fault_code );
-        msgbox( parent, errmsg);
-        free(errmsg);
-        goto cleanup;
+        gtk_entry_set_text(GTK_ENTRY(user), "");
+        gtk_entry_set_text(GTK_ENTRY(pass), "");
+        gtk_entry_set_text(GTK_ENTRY(title), "");
+        gtk_text_buffer_set_text(buffer, "", -1);
     }
     else
-    {
-        free((char *)postResult);
-    }
-    /* if we get here it worked.  Clear the entry data */
-    gtk_entry_set_text( GTK_ENTRY (user), "" );
-    gtk_entry_set_text( GTK_ENTRY (pass), "" );
-    gtk_text_buffer_set_text (buffer, "", -1);
+        msgbox(parent, error);
 
-cleanup:
     secure_bzero(c, strlen(c));
     g_free(c);
-    xmlrpc_DECREF( resultP );
-    xmlrpc_env_clean( &env );
-    xmlrpc_client_cleanup();
 }
 
 static void msgbox( GtkWindow * parent, char * msg )

@@ -7,28 +7,33 @@ CFLAGS+=	-Wall -pedantic -O2 -std=c99
 PREFIX?=	/usr/local
 MANDIR?=	${PREFIX}/share/man
 
-XMLRPC_CFLAGS!=	pkg-config --cflags xmlrpc xmlrpc_client 2>/dev/null || echo "-I/usr/local/include -I${LOCALBASE}/include"
-XMLRPC_LIBS!=	pkg-config --libs xmlrpc xmlrpc_client 2>/dev/null || echo "-L/usr/local/lib -L${LOCALBASE}/lib -lxmlrpc_client -lxmlrpc -lxmlrpc_xmlparse -lxmlrpc_xmltok -lxmlrpc_util"
+REST_CFLAGS!= pkg-config --cflags libcurl jansson
+REST_LIBS!= pkg-config --libs libcurl jansson
 
-CFLAGS+=	${XMLRPC_CFLAGS}
-LDFLAGS+=	${XMLRPC_LIBS}
+CFLAGS+= ${REST_CFLAGS}
+LDLIBS+= ${REST_LIBS}
 
-.PHONY: all clean install install-man
+.PHONY: all clean check install install-man
 
-all: clean jjclient
+all: jjclient
 
-jjclient: jj.o
-	${CC} ${CFLAGS} -o jjclient jj.o ${LDFLAGS}
+jjclient: jj.o jj_rest.o
+	${CC} ${CFLAGS} -o jjclient jj.o jj_rest.o ${LDFLAGS} ${LDLIBS}
 
-jj.o: jj.c
+jj.o: jj.c jj_rest.h
 	${CC} ${CFLAGS} -c jj.c
 
+jj_rest.o: jj_rest.c jj_rest.h
+	${CC} ${CFLAGS} -c jj_rest.c
+
+check:
+	python3 tests/test_rest.py
+
 install: install-man
-	install -o root -g wheel -m 555 jjclient ${DESTDIR}${PREFIX}/bin/jjclient
+	install -m 555 jjclient ${DESTDIR}${PREFIX}/bin/jjclient
 
 install-man:
-	install -o root -g wheel -m 444 jjclient.1 ${DESTDIR}${MANDIR}/man1/
+	install -m 444 jjclient.1 ${DESTDIR}${MANDIR}/man1/
 
 clean:
 	rm -f *.o jjclient
-

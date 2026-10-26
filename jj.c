@@ -45,8 +45,7 @@ SUCH DAMAGE.
 #include <sys/socket.h>
 #include <regex.h>
 
-#include <xmlrpc-c/base.h>
-#include <xmlrpc-c/client.h>
+#include "jj_rest.h"
 
 /* Portable secure memory zeroing */
 #include <strings.h>
@@ -62,7 +61,7 @@ static inline void secure_bzero(void *s, size_t n) {
 #endif
 
 #define NAME "JustJournal/UNIX"
-#define VERSION "2.0.3"
+#define VERSION JJ_VERSION
 #define ENTRY_MAX 32000
 #define USERNAME_MIN_LENGTH 3
 #define USERNAME_MAX_LENGTH 50
@@ -77,8 +76,7 @@ static inline void secure_bzero(void *s, size_t n) {
 #define RECENT_POST_COUNT 15
 
 static void usage(const char *name);
-static void die_if_fault_occurred(xmlrpc_env *env);
-static void getRecentPosts(const char *host, const char *username, const char *password);
+static bool getRecentPosts(jj_rest *client, const char *username, char *error, size_t error_size);
 
 static bool is_valid_hostname(const char *hostname);
 static bool is_valid_username(const char *input);
@@ -86,9 +84,9 @@ static bool is_valid_password(const char *input);
 
 int main(int argc, char *argv[])
 {
-    xmlrpc_env env;
-    xmlrpc_value *resultP = NULL;
-    const char *postResult = NULL;
+    jj_rest *client;
+    char error[256];
+    bool success;
     char username[USERLEN] = {'\0'};
     char password[PASSLEN] = {'\0'};
     char entry[ENTRY_MAX] = {'\0'};
@@ -126,7 +124,7 @@ int main(int argc, char *argv[])
                 exit(EXIT_FAILURE);
             }
 
-            (void)snprintf(host, sizeof(host), "https://%s/xml-rpc", optarg);
+            (void)snprintf(host, sizeof(host), "https://%s", optarg);
             host[sizeof(host) - 1] = '\0';
 
             hflag = true;
@@ -202,7 +200,7 @@ int main(int argc, char *argv[])
 
     /* set host if it's not defined */
     if (!hflag)
-        (void)snprintf(host, HOSTLEN, "https://%s/xml-rpc", HOST);
+        (void)snprintf(host, HOSTLEN, "https://%s", HOST);
 
     if (debug && hflag)
         fprintf(stderr, "host is set to: %s\n", host);
@@ -219,17 +217,19 @@ int main(int argc, char *argv[])
 
     if (rflag)
     {
-        getRecentPosts(host, username, password);
-        exit(0);
+        client = jj_rest_open(host, NAME "/" VERSION, error, sizeof(error));
+        success = client && jj_rest_login(client, username, password, error, sizeof(error));
+        secure_bzero(password, sizeof(password));
+        if (success)
+            success = getRecentPosts(client, username, error, sizeof(error));
+        jj_rest_close(client);
+        if (!success)
+            fprintf(stderr, "ERROR: %s\n", error);
+        return success ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
-    /* Copy the title into the top of entry if it's requested */
-    entry[0] = '\0';
-    if (title[0] != '\0')
-        (void)snprintf(entry, ENTRY_MAX, "<title>%s</title>", title);
-
-    /* Start from title or the beginning and copy the entry from stdin */
-    for (i = strlen(entry); i < ENTRY_MAX - 1; i++)
+    /* Read the body separately from the REST subject field. */
+    for (i = 0; i < ENTRY_MAX - 1; i++)
     {
         c = getchar();
         if (c == EOF)
@@ -244,124 +244,46 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    xmlrpc_client_init(XMLRPC_CLIENT_NO_FLAGS, NAME, VERSION);
-    xmlrpc_env_init(&env);
+    if ((i == ENTRY_MAX - 1 && getchar() != EOF) || ferror(stdin))
+    {
+        fprintf(stderr, "Error: Cannot read entry or entry is too long.\n");
+        secure_bzero(password, sizeof(password));
+        return EXIT_FAILURE;
+    }
 
-    resultP = xmlrpc_client_call(&env, host,
-                                 "blogger.newPost",
-                                 "(sssssb)",
-                                 "",       /* key, not used */
-                                 username, /* journal unique name */
-                                 username, /* journal username */
-                                 password, /* journal password */
-                                 entry,    /* blog content */
-                                 true);    /* post now */
-    secure_bzero((void *)password, sizeof(password));
-    die_if_fault_occurred(&env);
-
-    xmlrpc_read_string(&env, resultP, &postResult);
-    die_if_fault_occurred(&env);
-    if (debug && postResult != NULL)
-        fprintf(stderr, "Debug: post result is: %s\n", postResult);
-    free((char *)postResult);
-
-    xmlrpc_DECREF(resultP);
-    xmlrpc_env_clean(&env);
-    xmlrpc_client_cleanup();
-
-    return 0;
+    client = jj_rest_open(host, NAME "/" VERSION, error, sizeof(error));
+    success = client && jj_rest_login(client, username, password, error, sizeof(error));
+    secure_bzero(password, sizeof(password));
+    if (success)
+        success = jj_rest_post(client, title, entry, error, sizeof(error));
+    jj_rest_close(client);
+    if (!success)
+        fprintf(stderr, "ERROR: %s\n", error);
+    else if (debug)
+        fprintf(stderr, "Debug: entry saved.\n");
+    return success ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 static void usage(const char *name)
 {
-    fprintf(stderr, "jjclient %s\nusage: %s -u USERNAME -p PASSWORD [-h host] [-s subject] [-d]\n", VERSION, name);
+    fprintf(stderr, "jjclient %s\nusage: %s -u USERNAME -p PASSWORD [-h host] [-s subject] [-r] [-d]\n", VERSION, name);
     exit(EXIT_FAILURE);
 }
 
-static void die_if_fault_occurred(xmlrpc_env *env)
+static bool getRecentPosts(jj_rest *client, const char *username, char *error, size_t error_size)
 {
-    if (env == NULL)
-        exit(EXIT_FAILURE);
-
-    if (env->fault_occurred)
+    json_t *entries = jj_rest_recent(client, username, RECENT_POST_COUNT, error, error_size);
+    if (!entries)
+        return false;
+    for (size_t i = 0; i < json_array_size(entries); i++)
     {
-        if (env->fault_code == -501)
-            fprintf(stderr, "ERROR:  Your account info %s",
-                    "might be incorrect.\n");
-        else
-            fprintf(stderr, "XML-RPC Fault: %s (%d)\n",
-                    env->fault_string, env->fault_code);
-        exit(EXIT_FAILURE);
+        json_t *entry = json_array_get(entries, i);
+        printf("%zu %s\n\n%s\n\n", i,
+            json_string_value(json_object_get(entry, "subject")),
+            json_string_value(json_object_get(entry, "body")));
     }
-}
-
-static void getRecentPosts(const char *host, const char *username, const char *password)
-{
-    xmlrpc_env env;
-    xmlrpc_value *resultP = NULL;       // array item
-    xmlrpc_value *firstElementP = NULL; // first element in array
-    xmlrpc_value *varP = NULL;
-    const char *postResult = NULL;
-    int arrsize;
-
-    xmlrpc_client_init(XMLRPC_CLIENT_NO_FLAGS, NAME, VERSION);
-    xmlrpc_env_init(&env);
-
-    resultP = xmlrpc_client_call(&env, host,
-                                 "blogger.getRecentPosts",
-                                 "(ssssi)",
-                                 "",                 /* key, not used */
-                                 username,           /* journal unique name */
-                                 username,           /* journal username */
-                                 password,           /* journal password */
-                                 RECENT_POST_COUNT); /* post count */
-    secure_bzero((void *)password, sizeof(password));
-    die_if_fault_occurred(&env);
-
-    arrsize = xmlrpc_array_size(&env, resultP);
-    die_if_fault_occurred(&env);
-    // fprintf( stderr, "Array size %d\n", arrsize );
-
-    for (int i = 0; i < arrsize; i++)
-    {
-        firstElementP = NULL;
-        varP = NULL;
-        
-        xmlrpc_array_read_item(&env, resultP, i, &firstElementP);
-        die_if_fault_occurred(&env);
-
-        xmlrpc_struct_find_value(&env, firstElementP, "title", &varP);
-        die_if_fault_occurred(&env);
-        if (varP)
-        {
-            xmlrpc_read_string(&env, varP, &postResult);
-            die_if_fault_occurred(&env);
-            printf("%d %s\n\n", i, postResult);
-            free((char *)postResult);
-            postResult = NULL;
-            xmlrpc_DECREF(varP);
-            varP = NULL;
-        }
-
-        xmlrpc_struct_find_value(&env, firstElementP, "content", &varP);
-        die_if_fault_occurred(&env);
-        if (varP)
-        {
-            xmlrpc_read_string(&env, varP, &postResult);
-            die_if_fault_occurred(&env);
-            printf("%s\n\n", postResult);
-            free((char *)postResult);
-            postResult = NULL;
-            xmlrpc_DECREF(varP);
-            varP = NULL;
-        }
-
-        xmlrpc_DECREF(firstElementP);
-        firstElementP = NULL;
-    }
-    xmlrpc_DECREF(resultP);
-    xmlrpc_env_clean(&env);
-    xmlrpc_client_cleanup();
+    json_decref(entries);
+    return true;
 }
 
 static bool is_valid_username(const char *input) {
