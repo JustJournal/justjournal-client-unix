@@ -1,6 +1,7 @@
 #include "jj_rest.h"
 
 #include <curl/curl.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -112,16 +113,17 @@ failure:
     return NULL;
 }
 
-static json_t *request(jj_rest *client, const char *path, json_t *payload,
+/* The caller owns body and erases it after this function stops using it. */
+static json_t *request_body(jj_rest *client, const char *path, const char *body,
     char *error, size_t error_size)
 {
     struct response response = {NULL, 0};
-    char *url = NULL, *body = NULL;
+    char *url = NULL;
     json_t *result = NULL;
     long status = 0;
     CURLcode code;
     const char *operation = strcmp(path, "/api/login") == 0 ? "Login" :
-        payload ? "Saving entry" : "Loading entries";
+        body ? "Saving entry" : "Loading entries";
 
     snprintf(error, error_size, "%s failed: unable to prepare REST request.", operation);
     url = malloc(strlen(client->base_url) + strlen(path) + 1);
@@ -129,19 +131,16 @@ static json_t *request(jj_rest *client, const char *path, json_t *payload,
         goto cleanup;
     strcpy(url, client->base_url);
     strcat(url, path);
-    if (payload) {
-        body = json_dumps(payload, JSON_COMPACT);
-        if (!body) {
-            snprintf(error, error_size, "Unable to encode request as UTF-8 JSON.");
-            goto cleanup;
-        }
+    if (body && strlen(body) > LONG_MAX) {
+        snprintf(error, error_size, "Request body is too large.");
+        goto cleanup;
     }
     if (curl_easy_setopt(client->curl, CURLOPT_URL, url) != CURLE_OK ||
         curl_easy_setopt(client->curl, CURLOPT_WRITEDATA, &response) != CURLE_OK ||
         curl_easy_setopt(client->curl, CURLOPT_POSTFIELDS, body) != CURLE_OK ||
         curl_easy_setopt(client->curl, CURLOPT_POSTFIELDSIZE,
             body ? (long)strlen(body) : 0L) != CURLE_OK ||
-        curl_easy_setopt(client->curl, CURLOPT_HTTPGET, payload ? 0L : 1L) != CURLE_OK)
+        curl_easy_setopt(client->curl, CURLOPT_HTTPGET, body ? 0L : 1L) != CURLE_OK)
         goto cleanup;
 
     code = curl_easy_perform(client->curl);
@@ -167,13 +166,115 @@ cleanup:
     /* Do not leave libcurl pointing into the login payload after it is erased. */
     curl_easy_setopt(client->curl, CURLOPT_POSTFIELDS, NULL);
     curl_easy_setopt(client->curl, CURLOPT_WRITEDATA, NULL);
+    free(url);
+    free(response.data);
+    return result;
+}
+
+static json_t *request(jj_rest *client, const char *path, json_t *payload,
+    char *error, size_t error_size)
+{
+    char *body = payload ? json_dumps(payload, JSON_COMPACT) : NULL;
+    json_t *result;
+
+    if (payload && !body) {
+        snprintf(error, error_size, "Unable to encode request as UTF-8 JSON.");
+        return NULL;
+    }
+    result = request_body(client, path, body, error, error_size);
     if (body) {
         wipe(body, strlen(body));
         free(body);
     }
-    free(url);
-    free(response.data);
     return result;
+}
+
+/* Write one JSON string directly, validating UTF-8 without allocating copies. */
+static bool quote_credential(const char *value, char **destination)
+{
+    const unsigned char *p = (const unsigned char *)value;
+    static const char hex[] = "0123456789abcdef";
+    char *out = *destination;
+
+    *out++ = '"';
+    while (*p) {
+        const unsigned char *start = p;
+        unsigned char c = *p++;
+        if (c == '"' || c == '\\') {
+            *out++ = '\\';
+            *out++ = (char)c;
+        } else if (c < 0x20) {
+            memcpy(out, "\\u00", 4);
+            out += 4;
+            *out++ = hex[c >> 4];
+            *out++ = hex[c & 0xf];
+        } else if (c < 0x80) {
+            *out++ = (char)c;
+        } else {
+            unsigned int codepoint, minimum;
+            size_t remaining;
+
+            if (c >= 0xc2 && c <= 0xdf) {
+                codepoint = c & 0x1f;
+                minimum = 0x80;
+                remaining = 1;
+            } else if (c >= 0xe0 && c <= 0xef) {
+                codepoint = c & 0x0f;
+                minimum = 0x800;
+                remaining = 2;
+            } else if (c >= 0xf0 && c <= 0xf4) {
+                codepoint = c & 0x07;
+                minimum = 0x10000;
+                remaining = 3;
+            } else
+                return false;
+            while (remaining--) {
+                if (*p < 0x80 || *p > 0xbf)
+                    return false;
+                codepoint = (codepoint << 6) | (*p++ & 0x3f);
+            }
+            if (codepoint < minimum || codepoint > 0x10ffff ||
+                (codepoint >= 0xd800 && codepoint <= 0xdfff))
+                return false;
+            memcpy(out, start, (size_t)(p - start));
+            out += p - start;
+        }
+    }
+    *out++ = '"';
+    *destination = out;
+    return true;
+}
+
+static char *login_body(const char *username, const char *password, size_t *capacity)
+{
+    const size_t overhead = sizeof("{\"username\":\"\",\"password\":\"\"}");
+    const size_t maximum = (SIZE_MAX - overhead) / 6;
+    size_t username_size = strlen(username), password_size = strlen(password);
+    char *body, *out;
+
+    /* Every input byte needs at most six output bytes (a JSON \\u00XX escape). */
+    if (username_size > maximum || password_size > maximum - username_size)
+        return NULL;
+    *capacity = overhead + 6 * (username_size + password_size);
+    body = malloc(*capacity);
+    if (!body)
+        return NULL;
+    memcpy(body, "{\"username\":", sizeof("{\"username\":") - 1);
+    out = body + sizeof("{\"username\":") - 1;
+    if (!quote_credential(username, &out))
+        goto failure;
+    memcpy(out, ",\"password\":", sizeof(",\"password\":") - 1);
+    out += sizeof(",\"password\":") - 1;
+    if (!quote_credential(password, &out))
+        goto failure;
+    *out++ = '}';
+    *out = '\0';
+    return body;
+
+failure:
+    wipe(body, *capacity);
+    free(body);
+    return NULL;
 }
 
 static bool string_is(json_t *value, const char *expected)
@@ -184,16 +285,18 @@ static bool string_is(json_t *value, const char *expected)
 bool jj_rest_login(jj_rest *client, const char *username, const char *password,
     char *error, size_t error_size)
 {
-    json_t *payload, *result;
+    size_t capacity = 0;
+    char *body = login_body(username, password, &capacity);
+    json_t *result;
     bool ok;
 
-    payload = json_pack("{s:s,s:s}", "username", username, "password", password);
-    if (!payload) {
+    if (!body) {
         snprintf(error, error_size, "Unable to encode credentials as UTF-8 JSON.");
         return false;
     }
-    result = request(client, "/api/login", payload, error, error_size);
-    json_decref(payload);
+    result = request_body(client, "/api/login", body, error, error_size);
+    wipe(body, capacity);
+    free(body);
     if (!result)
         return false;
     ok = string_is(json_object_get(result, "status"), "JJ.LOGIN.OK") &&

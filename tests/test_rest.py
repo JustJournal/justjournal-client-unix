@@ -93,6 +93,11 @@ class RestTests(unittest.TestCase):
                 if self.headers.get("Cookie") != "JSESSIONID=test-session":
                     return self.reply(403, {})
                 entries = [{"subject": 'Title "one"', "body": "Body\n雪"}]
+                if cls.mode == "recent_controls":
+                    controls = "".join(chr(c) for c in range(1, 32) if c not in (9, 10))
+                    controls += chr(127) + "".join(chr(c) for c in range(128, 160))
+                    text = "雪Û😀\n\t" + controls + "\x1b[2J\x1b]0;title\x07\u009b2J\u009d0;title\u009c"
+                    entries = [{"subject": text, "body": text}]
                 if cls.mode == "recent_empty":
                     return self.reply(200, {"page": {"totalElements": 0}})
                 if cls.mode == "recent_bad":
@@ -277,6 +282,19 @@ int main(int argc, char **argv)
         for mode in ("recent_bad", "recent_bad_shape"):
             type(self).mode = mode
             self.assertEqual(self.cli_run("-r", ok=False).stdout, "")
+
+    def test_recent_terminal_controls_are_escaped(self):
+        type(self).mode = "recent_controls"
+        result = self.cli_run("-r", body="")
+        controls = "".join("\\x%02x" % c for c in range(1, 32) if c not in (9, 10))
+        controls += "\\x7f" + "".join("\\u%04x" % c for c in range(128, 160))
+        text = ("雪Û😀\n\t" + controls +
+                "\\x1b[2J\\x1b]0;title\\x07\\u009b2J\\u009d0;title\\u009c")
+        self.assertEqual(result.stdout, "0 " + text + "\n\n" + text + "\n\n")
+        for character in result.stdout:
+            codepoint = ord(character)
+            self.assertFalse((codepoint < 32 and codepoint not in (9, 10)) or
+                             127 <= codepoint <= 159)
 
     def test_input_limits(self):
         self.cli_run(body="", ok=False)

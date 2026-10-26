@@ -73,6 +73,8 @@ jjclient -u username -p password < myfile.txt
 Other flags include -s for subject, -d for debug messages, and -r to list
 the latest 15 entries (including private entries and drafts for your account).
 Use -h hostname to connect to another compatible HTTPS server.
+Control characters in retrieved entries are displayed as escape sequences;
+newlines, tabs, and normal UTF-8 text remain intact.
 
 Subjects are sent separately from entry bodies. The legacy <title>...</title>
 and <music>...</music> conventions remain supported. Input must be UTF-8;
@@ -162,7 +164,9 @@ The root `make check` and `gmake check` wrappers run the suite through CTest.
 The suite runs both clients against a local HTTPS test server with a temporary
 certificate. It checks login and session cookies, JSON escaping, entry defaults,
 recent-entry JSON/HAL responses, failure handling, and GTK draft retention.
-It does not contact JustJournal.com or post to a real account.
+It does not contact JustJournal.com or post to a real account. CTest also runs
+offline credential-buffer checks for complete erasure, JSON/UTF-8 encoding,
+and allocation-failure handling.
 
 ## History
 

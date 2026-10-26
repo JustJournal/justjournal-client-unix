@@ -22,6 +22,7 @@ jjclient: configure
 
 check: configure
 	${CMAKE} -S . -B "${BUILD_DIR}" -DBUILD_TESTING=ON ${CMAKE_ARGS}
+	${CMAKE} --build "${BUILD_DIR}"
 	cd "${BUILD_DIR}" && ${CTEST} --output-on-failure
 
 install: jjclient install-man

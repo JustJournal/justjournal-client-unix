@@ -270,6 +270,27 @@ static void usage(const char *name)
     exit(EXIT_FAILURE);
 }
 
+/* JSON strings are UTF-8. Keep printable text, tabs and newlines intact,
+ * but render terminal controls visibly, including UTF-8 encoded C1 controls.
+ * Use the JSON length so an embedded NUL cannot hide the rest of a string. */
+static void print_terminal_text(const json_t *value)
+{
+    const unsigned char *text = (const unsigned char *)json_string_value(value);
+    size_t length = json_string_length(value);
+
+    for (size_t i = 0; i < length; i++)
+    {
+        unsigned char c = text[i];
+        if ((c < 0x20 && c != '\n' && c != '\t') || c == 0x7f)
+            printf("\\x%02x", (unsigned int)c);
+        else if (c == 0xc2 && i + 1 < length &&
+                 text[i + 1] >= 0x80 && text[i + 1] <= 0x9f)
+            printf("\\u%04x", (unsigned int)text[++i]);
+        else
+            putchar(c);
+    }
+}
+
 static bool getRecentPosts(jj_rest *client, const char *username, char *error, size_t error_size)
 {
     json_t *entries = jj_rest_recent(client, username, RECENT_POST_COUNT, error, error_size);
@@ -278,9 +299,11 @@ static bool getRecentPosts(jj_rest *client, const char *username, char *error, s
     for (size_t i = 0; i < json_array_size(entries); i++)
     {
         json_t *entry = json_array_get(entries, i);
-        printf("%zu %s\n\n%s\n\n", i,
-            json_string_value(json_object_get(entry, "subject")),
-            json_string_value(json_object_get(entry, "body")));
+        printf("%zu ", i);
+        print_terminal_text(json_object_get(entry, "subject"));
+        printf("\n\n");
+        print_terminal_text(json_object_get(entry, "body"));
+        printf("\n\n");
     }
     json_decref(entries);
     return true;
