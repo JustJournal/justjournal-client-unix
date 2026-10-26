@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bmake pkg-config libcurl4-openssl-dev libjansson-dev
+          sudo apt-get install -y cmake build-essential pkg-config libcurl4-openssl-dev libjansson-dev
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
@@ -37,8 +37,10 @@ jobs:
           languages: ${{ matrix.language }}
           queries: +security-and-quality
 
-      - name: Build using bmake
-        run: bmake
+      - name: Build using CMake
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3

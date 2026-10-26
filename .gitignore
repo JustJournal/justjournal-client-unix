@@ -1,3 +1,7 @@
 jjclient
 gtkjj
 *.o
+
+# CMake build trees (including the compatibility wrappers).
+/build*/
+/gtk/build*/

@@ -29,6 +29,7 @@ jobs:
           envs: |
             PKG_DISABLE_AUTOUPDATE=1
             ASSUME_ALWAYS_YES=1
-          prepare: pkg install -y pkgconf curl jansson
+          prepare: pkg install -y cmake pkgconf curl jansson
           run: |
-            make
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+            cmake --build build

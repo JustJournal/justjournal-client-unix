@@ -9,7 +9,7 @@ pipeline {
                 agent {
                     label "${ARCHITECTURE} && bsd"
                 }
-                
+
                 when { anyOf {
                     expression { params.ARCHITECTURE_FILTER == 'all' }
                     expression { params.ARCHITECTURE_FILTER == env.ARCHITECTURE }
@@ -23,13 +23,13 @@ pipeline {
                 stages {
                     stage('Prepare') {
                         steps {
-                            sh 'make clean' 
+                            sh 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_GTK=OFF -DBUILD_TESTING=OFF'
                         }
                     }
                     stage('Build') {
                         steps {
                             echo "Do build for ${ARCHITECTURE}"
-                             sh 'make all' 
+                            sh 'cmake --build build --clean-first'
                         }
                     }
                 }

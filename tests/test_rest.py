@@ -224,7 +224,7 @@ int main(int argc, char **argv)
         self.assertEqual([r[0] for r in self.requests], ["/api/login", "/api/entry"])
         self.assertEqual(self.requests[0][2], {"username": "testuser", "password": "testpass"})
         self.assertEqual(self.requests[0][1]["Accept"], "*/*")
-        self.assertIn("2.1.0", self.requests[0][1]["User-Agent"])
+        self.assertIn("2.2.0", self.requests[0][1]["User-Agent"])
         self.assertEqual(self.requests[1][2], {
             "subject": 'Subject "quoted" \\ 雪', "body": 'body "quote" \\ \n\t雪',
             "security": 2, "format": "TEXT", "autoFormat": True,

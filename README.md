@@ -17,34 +17,48 @@ pkg install jjclient
 ### Build jjclient from source
 
 The clients are written in C99 for MidnightBSD, FreeBSD, and Linux.
-Version 2.1.0 uses the JSON REST API over HTTPS. It requires libcurl,
-Jansson, and pkg-config to build.
+Version 2.2.0 uses the JSON REST API over HTTPS. Building requires CMake 3.16
+or newer, a C compiler and build tool (make or Ninja), libcurl, Jansson, and
+pkg-config.
 
-#### Compiling on MidnightBSD & FreeBSD: (using bmake)
+Install the dependencies on MidnightBSD:
 
-Install the dependencies:
-MidnightBSD:
-mport install curl jansson pkgconf
+```sh
+mport install cmake curl jansson pkgconf
+```
 
-FreeBSD:
-pkg install curl jansson pkgconf
+On FreeBSD:
 
-Then run:
-
-make
-doas make install
-
-NOTE: uses Makefile
-
-#### Compiling on Linux: (using gmake)
-
-install the dependencies
+```sh
+pkg install cmake curl jansson pkgconf
+```
 
 On Debian/Ubuntu Linux:
-sudo apt-get install libcurl4-openssl-dev libjansson-dev pkg-config
 
-make
-make install
+```sh
+sudo apt-get install build-essential cmake libcurl4-openssl-dev libjansson-dev pkg-config
+```
+
+From the repository root, configure and build the CLI client:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+The executable is `build/jjclient`. Install it and its manual page with:
+
+```sh
+cmake --install build
+```
+
+Installation defaults to `/usr/local`; use your system's privilege tool if
+needed. Set `-DCMAKE_INSTALL_PREFIX=/your/prefix` when configuring to change
+that prefix. Staged packaging is supported with
+`DESTDIR=/your/stage cmake --install build`.
+
+The root `make` (BSD make) and `gmake` (GNU make) commands remain available as
+CMake wrappers and place `jjclient` in the repository root.
 
 ### Using the software
 
@@ -68,13 +82,12 @@ entries larger than 31,999 bytes are rejected instead of truncated.
 
 A graphical client is provided in the gtk folder.
 
-This client requires GTK 3, libcurl, Jansson, and pkg-config to build.
+This client additionally requires GTK 3 to build.
 Install gtk3 on MidnightBSD/FreeBSD, or libgtk-3-dev on Debian/Ubuntu,
 in addition to the dependencies above.
 
-Run the build commands below from the gtk directory. The optional Title field
-sets the entry subject separately from the body. Music accepts the current
-artist/song; Tags accepts tags separated by spaces or commas and converts them
+The optional Title field sets the entry subject separately from the body.
+Music accepts the current artist/song; Tags accepts tags separated by spaces or commas and converts them
 to lowercase, matching the website. Empty tags are ignored.
 
 Failed requests retain all fields so you can correct the problem and retry.
@@ -88,18 +101,33 @@ mport install gtkjj
 
 ### Build gtkjj from source
 
-Compiling on MidnightBSD:
+From the repository root, enable GTK when configuring:
 
-make
-doas make install
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_GTK=ON
+cmake --build build
+cmake --install build
+```
 
-Compiling on Linux
-gmake
-gmake install
+This builds and installs both clients. The graphical executable is
+`build/gtkjj`. GTK is disabled by default, so CLI-only builds do not require
+GTK development files.
+
+For GTK-only packaging, build the `gtkjj` target and install the `gtk`
+component:
+
+```sh
+cmake --build build --target gtkjj
+DESTDIR=/your/stage cmake --install build --component gtk
+```
+
+The other installation components are `cli` (the CLI executable) and `man`
+(its manual page). The legacy `make` or `gmake` commands in the `gtk`
+directory remain available as CMake wrappers and place `gtkjj` there.
 
 ## Compatibility
 
-Both clients are version 2.1.0 and target MidnightBSD, FreeBSD, and Linux.
+Both clients are version 2.2.0 and target MidnightBSD, FreeBSD, and Linux.
 The server must support the JSON session login at POST /api/login and entry
 creation at POST /api/entry. The CLI's -r option uses the authenticated
 GET /api/entry/{username}/size/15/page/0 endpoint. Servers supporting only
@@ -118,10 +146,18 @@ The request format follows the server's
 
 ## Tests
 
-Run `make check` (BSD make) or `gmake check` (GNU make) from the repository
-root. Tests require Python 3, openssl, and the build dependencies. GTK callback
+Enable testing and run the suite through CTest:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build build
+(cd build && ctest --output-on-failure)
+```
+
+Tests require Python 3, openssl, and the build dependencies. GTK callback
 tests additionally require GTK 3 and Xvfb; they are reported as skipped if
-those tools are unavailable.
+those tools are unavailable. Add `-DBUILD_GTK=ON` to also build the GTK app.
+The root `make check` and `gmake check` wrappers run the suite through CTest.
 
 The suite runs both clients against a local HTTPS test server with a temporary
 certificate. It checks login and session cookies, JSON escaping, entry defaults,

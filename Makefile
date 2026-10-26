@@ -1,39 +1,34 @@
-# Makefile for jjclient - MidnightBSD/FreeBSD
+# Compatibility wrapper for BSD make and GNU make. Build rules live in CMake.
+CMAKE?=cmake
+CC?=cc
+CTEST?=ctest
+BUILD_DIR?=build
+PREFIX?=/usr/local
+MANDIR?=${PREFIX}/share/man
+CMAKE_ARGS?=
 
-.POSIX:
-
-CC?=		cc
-CFLAGS+=	-Wall -pedantic -O2 -std=c99
-PREFIX?=	/usr/local
-MANDIR?=	${PREFIX}/share/man
-
-REST_CFLAGS!= pkg-config --cflags libcurl jansson
-REST_LIBS!= pkg-config --libs libcurl jansson
-
-CFLAGS+= ${REST_CFLAGS}
-LDLIBS+= ${REST_LIBS}
-
-.PHONY: all clean check install install-man
+.PHONY: all configure jjclient check install install-man clean
 
 all: jjclient
 
-jjclient: jj.o jj_rest.o
-	${CC} ${CFLAGS} -o jjclient jj.o jj_rest.o ${LDFLAGS} ${LDLIBS}
+configure:
+	${CMAKE} -S . -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release \
+	    -DCMAKE_C_COMPILER="${CC}" -DBUILD_GTK=OFF \
+	    -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$$(pwd)" \
+	    -DCMAKE_INSTALL_PREFIX="${PREFIX}" -DCMAKE_INSTALL_MANDIR="${MANDIR}" ${CMAKE_ARGS}
 
-jj.o: jj.c jj_rest.h
-	${CC} ${CFLAGS} -c jj.c
+jjclient: configure
+	${CMAKE} --build "${BUILD_DIR}" --target jjclient
 
-jj_rest.o: jj_rest.c jj_rest.h
-	${CC} ${CFLAGS} -c jj_rest.c
+check: configure
+	${CMAKE} -S . -B "${BUILD_DIR}" -DBUILD_TESTING=ON ${CMAKE_ARGS}
+	cd "${BUILD_DIR}" && ${CTEST} --output-on-failure
 
-check:
-	python3 tests/test_rest.py
+install: jjclient install-man
+	DESTDIR="${DESTDIR}" ${CMAKE} --install "${BUILD_DIR}" --component cli
 
-install: install-man
-	install -m 555 jjclient ${DESTDIR}${PREFIX}/bin/jjclient
-
-install-man:
-	install -m 444 jjclient.1 ${DESTDIR}${MANDIR}/man1/
+install-man: configure
+	DESTDIR="${DESTDIR}" ${CMAKE} --install "${BUILD_DIR}" --component man
 
 clean:
-	rm -f *.o jjclient
+	if test -f "${BUILD_DIR}/CMakeCache.txt"; then ${CMAKE} --build "${BUILD_DIR}" --target clean; fi
