@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=JustJournal
+GenericName=Blog Client
+Comment=Manage your JustJournal entries
+Exec=gtkjj
+Icon=accessories-text-editor
+Terminal=false
+Categories=Network;
