@@ -75,7 +75,7 @@ static inline void secure_bzero(void *s, size_t n) {
 #define MAX_HOST_NAME (HOSTLEN - 17)
 #define TITLELEN 256
 #define HOST "www.justjournal.com"
-#define RECENT_POST_COUNT 15
+#define RECENT_POST_COUNT 20
 
 static void usage(const char *name);
 static bool getRecentPosts(jj_rest *client, const char *username, char *error, size_t error_size);
@@ -467,6 +467,8 @@ static bool getRecentPosts(jj_rest *client, const char *username, char *error, s
     {
         json_t *entry = json_array_get(entries, i);
         printf("%zu ", i);
+        print_terminal_text(json_object_get(entry, "date"));
+        putchar(' ');
         print_terminal_text(json_object_get(entry, "subject"));
         printf("\n\n");
         print_terminal_text(json_object_get(entry, "body"));

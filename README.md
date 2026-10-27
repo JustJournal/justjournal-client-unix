@@ -96,8 +96,13 @@ can expose the password through process arguments and shell history. Prefer
 the terminal prompt or `--password-fd`; `-p` and `--password-fd` cannot be
 combined. Password input through environment variables is not supported.
 
-Other flags include -s for subject, -d for debug messages, and -r to list
-the latest 15 entries (including private entries and drafts for your account).
+Other flags include -s for subject, -d for debug messages, and -r to print
+the date, subject, and body of the latest 20 entries (including private entries
+and drafts for your account) without posting. For example:
+
+```sh
+jjclient -u username -r
+```
 
 Posting options:
 
@@ -176,7 +181,7 @@ directory remain available as CMake wrappers and place `gtkjj` there.
 Both clients are version 2.2.0 and target MidnightBSD, FreeBSD, and Linux.
 The server must support the JSON session login at POST /api/login and entry
 creation at POST /api/entry. The CLI's -r option uses the authenticated
-GET /api/entry/{username}/size/15/page/0 endpoint. Servers supporting only
+GET /api/entry/{username}/size/20/page/0 endpoint. Servers supporting only
 XML-RPC require an older client.
 
 Both clients verify HTTPS certificates. Session cookies are held in memory
