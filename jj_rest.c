@@ -476,7 +476,8 @@ json_t *jj_rest_recent(jj_rest *client, const char *username, size_t count,
     json_decref(result);
     for (size_t i = 0; i < json_array_size(entries); i++) {
         json_t *entry = json_array_get(entries, i);
-        if (!json_is_string(json_object_get(entry, "subject")) ||
+        if (!json_is_string(json_object_get(entry, "date")) ||
+            !json_is_string(json_object_get(entry, "subject")) ||
             !json_is_string(json_object_get(entry, "body"))) {
             snprintf(error, error_size, "Server returned an invalid recent entry.");
             json_decref(entries);

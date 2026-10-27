@@ -23,7 +23,7 @@
 .\"
 .\" $Id: jjclient.1,v 1.1 2008/09/27 00:30:40 laffer1 Exp $
 .\"
-.Dd October 25, 2026
+.Dd October 26, 2026
 .Dt JJCLIENT 1
 .Os
 .Sh NAME
@@ -71,8 +71,9 @@ The following options are available:
 .It Fl d
 Debug login and posting problems.
 .It Fl r
-List the latest 15 entries for the authenticated account, including private
-entries and drafts, instead of reading an entry from standard input.
+Print the date, subject, and body of the latest 20 entries for the authenticated
+account, including private entries and drafts, instead of reading an entry
+from standard input or posting it.
 .It Fl h
 Specify the host to connect to.
 .It Fl u

@@ -99,16 +99,25 @@ class RestTests(unittest.TestCase):
                 cls.requests.append((self.path, dict(self.headers), None))
                 if self.headers.get("Cookie") != "JSESSIONID=test-session":
                     return self.reply(403, {})
-                entries = [{"subject": 'Title "one"', "body": "Body\n雪"}]
+                entries = [{"date": "2026-10-26T12:30:00Z",
+                            "subject": 'Title "one"', "body": "Body\n雪"}]
                 if cls.mode == "recent_controls":
                     controls = "".join(chr(c) for c in range(1, 32) if c not in (9, 10))
                     controls += chr(127) + "".join(chr(c) for c in range(128, 160))
                     text = "雪Û😀\n\t" + controls + "\x1b[2J\x1b]0;title\x07\u009b2J\u009d0;title\u009c"
-                    entries = [{"subject": text, "body": text}]
+                    entries = [{"date": text, "subject": text, "body": text}]
+                if cls.mode == "recent_twenty":
+                    entries = [{"date": "2026-10-26T12:30:00Z",
+                                "subject": f"Title {i}", "body": f"Body {i}"}
+                               for i in range(20)]
                 if cls.mode == "recent_empty":
                     return self.reply(200, {"page": {"totalElements": 0}})
                 if cls.mode == "recent_bad":
-                    return self.reply(200, {"content": [{"subject": "missing body"}]})
+                    return self.reply(200, {"content": [{"date": "2026-10-26T12:30:00Z",
+                                                         "subject": "missing body"}]})
+                if cls.mode == "recent_bad_date":
+                    return self.reply(200, {"content": [{"date": None,
+                                                         "subject": "Title", "body": "Body"}]})
                 if cls.mode == "recent_bad_shape":
                     return self.reply(200, {})
                 if cls.mode == "recent_hal":
@@ -566,14 +575,24 @@ sys.exit(status if status >= 0 else 128 - status)
         for mode in ("ok", "recent_hal"):
             with self.subTest(mode=mode):
                 type(self).mode = mode
-                result = self.cli_run("-r", body="")
-                self.assertEqual(result.stdout, '0 Title "one"\n\nBody\n雪\n\n')
-                self.assertEqual(self.requests[-1][0], "/api/entry/testuser/size/15/page/0")
+                type(self).requests = []
+                result = self.cli_run("-r", body="This must not be posted")
+                self.assertEqual(result.stdout,
+                                 '0 2026-10-26T12:30:00Z Title "one"\n\nBody\n雪\n\n')
+                self.assertEqual([request[0] for request in self.requests],
+                                 ["/api/login", "/api/entry/testuser/size/20/page/0"])
+
+    def test_recent_twenty_entries(self):
+        type(self).mode = "recent_twenty"
+        result = self.cli_run("-r")
+        self.assertEqual(result.stdout.count("2026-10-26T12:30:00Z"), 20)
+        self.assertIn("19 2026-10-26T12:30:00Z Title 19\n\nBody 19\n\n", result.stdout)
+        self.assertEqual(self.requests[-1][0], "/api/entry/testuser/size/20/page/0")
 
     def test_recent_empty_and_invalid(self):
         type(self).mode = "recent_empty"
         self.assertEqual(self.cli_run("-r").stdout, "")
-        for mode in ("recent_bad", "recent_bad_shape"):
+        for mode in ("recent_bad", "recent_bad_date", "recent_bad_shape"):
             type(self).mode = mode
             self.assertEqual(self.cli_run("-r", ok=False).stdout, "")
 
@@ -584,7 +603,7 @@ sys.exit(status if status >= 0 else 128 - status)
         controls += "\\x7f" + "".join("\\u%04x" % c for c in range(128, 160))
         text = ("雪Û😀\n\t" + controls +
                 "\\x1b[2J\\x1b]0;title\\x07\\u009b2J\\u009d0;title\\u009c")
-        self.assertEqual(result.stdout, "0 " + text + "\n\n" + text + "\n\n")
+        self.assertEqual(result.stdout, "0 " + text + " " + text + "\n\n" + text + "\n\n")
         for character in result.stdout:
             codepoint = ord(character)
             self.assertFalse((codepoint < 32 and codepoint not in (9, 10)) or
