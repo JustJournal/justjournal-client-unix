@@ -33,6 +33,7 @@ class RestTests(unittest.TestCase):
         cls.work = Path(cls.temp.name)
         cls.requests = []
         cls.mode = "ok"
+        cls.login_count = 0
         cert = cls.work / "cert.pem"
         key = cls.work / "key.pem"
         subprocess.run([
@@ -46,13 +47,17 @@ class RestTests(unittest.TestCase):
             def log_message(self, *args):
                 pass
 
-            def reply(self, status, body, cookie=False):
+            def session_cookie(self):
+                session = "renewed-session" if cls.mode == "edit_expired" and cls.login_count > 1 else "test-session"
+                return "JSESSIONID=" + session
+
+            def reply(self, status, body, cookie=False, content_type="application/json"):
                 data = body if isinstance(body, bytes) else json.dumps(body).encode()
                 self.send_response(status)
-                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(data)))
                 if cookie:
-                    self.send_header("Set-Cookie", "JSESSIONID=test-session; Path=/; Secure; HttpOnly")
+                    self.send_header("Set-Cookie", self.session_cookie() + "; Path=/; Secure; HttpOnly")
                 self.end_headers()
                 self.wfile.write(data)
 
@@ -60,6 +65,7 @@ class RestTests(unittest.TestCase):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 cls.requests.append((self.path, dict(self.headers), body))
                 if self.path == "/api/login":
+                    cls.login_count += 1
                     if cls.mode == "login_500":
                         return self.reply(500, {"error": "Unknown error occurred. Please try again later."})
                     if cls.mode == "unauthorized":
@@ -73,7 +79,7 @@ class RestTests(unittest.TestCase):
                     return self.reply(200, {"status": "JJ.LOGIN.OK", "username": body["username"]}, cls.mode != "no_cookie")
                 if self.path != "/api/entry":
                     return self.reply(404, {})
-                if self.headers.get("Cookie") != "JSESSIONID=test-session":
+                if self.headers.get("Cookie") != self.session_cookie():
                     return self.reply(403, {})
                 # Production rejects INSERT when omitted music becomes null.
                 if not isinstance(body.get("music"), str):
@@ -97,13 +103,14 @@ class RestTests(unittest.TestCase):
 
             def do_GET(self):
                 cls.requests.append((self.path, dict(self.headers), None))
-                if self.headers.get("Cookie") != "JSESSIONID=test-session":
+                if self.headers.get("Cookie") != self.session_cookie():
                     return self.reply(403, {})
-                if self.path == "/api/entry/testuser/eid/42":
+                entry_id = 5000000000 if cls.mode == "large_id" else 42
+                if self.path == f"/api/entry/testuser/eid/{entry_id}":
                     if cls.mode == "edit_bad_entry":
                         return self.reply(200, {"entryId": 41})
                     return self.reply(200, {
-                        "entryId": 42, "date": "2026-10-26T12:30:00Z",
+                        "entryId": entry_id, "date": "2026-10-26T12:30:00Z",
                         "subject": "Existing title", "body": "Existing body",
                         "security": {"id": 1, "name": "friends"},
                         "format": "MARKDOWN", "autoFormat": False,
@@ -111,8 +118,9 @@ class RestTests(unittest.TestCase):
                         "draft": True, "mood": 19, "location": 3,
                         "music": "Existing music", "trackback": "",
                         "tags": ["existing"], "comments": []})
-                entries = [{"entryId": 42, "date": "2026-10-26T12:30:00Z",
-                            "subject": 'Title "one"', "body": "Body\n雪"}]
+                entries = [{"entryId": entry_id, "date": "2026-10-26T12:30:00Z",
+                            "subject": 'Title "one"', "body": "Body\n雪",
+                            "music": "Existing music", "tags": ["existing"]}]
                 if cls.mode == "recent_missing_id":
                     del entries[0]["entryId"]
                 if cls.mode == "recent_controls":
@@ -141,23 +149,29 @@ class RestTests(unittest.TestCase):
             def do_PUT(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 cls.requests.append((self.path, dict(self.headers), body))
-                if self.path != "/api/entry" or self.headers.get("Cookie") != "JSESSIONID=test-session":
+                if cls.mode == "edit_proxy_html":
+                    return self.reply(403, b"<html><h1>Forbidden</h1></html>",
+                                      content_type="text/html")
+                if self.path != "/api/entry" or self.headers.get("Cookie") != self.session_cookie():
                     return self.reply(403, {})
+                if cls.mode in ("edit_expired", "edit_expired_cancel") and cls.login_count == 1:
+                    return self.reply(403, {"error": "The login timed out or is invalid."})
                 if cls.mode == "edit_500":
                     return self.reply(500, {"error": "failed"})
                 if cls.mode == "edit_wrong_id":
                     return self.reply(200, {"id": "41"})
-                return self.reply(200, {"id": "42"})
+                return self.reply(200, {"id": "5000000000" if cls.mode == "large_id" else "42"})
 
             def do_DELETE(self):
                 cls.requests.append((self.path, dict(self.headers), None))
-                if self.path != "/api/entry/42" or self.headers.get("Cookie") != "JSESSIONID=test-session":
+                entry_id = 5000000000 if cls.mode == "large_id" else 42
+                if self.path != f"/api/entry/{entry_id}" or self.headers.get("Cookie") != self.session_cookie():
                     return self.reply(403, {})
                 if cls.mode == "delete_500":
                     return self.reply(500, {"error": "failed"})
                 if cls.mode == "delete_wrong_id":
                     return self.reply(200, {"id": "41"})
-                return self.reply(200, {"id": "42"})
+                return self.reply(200, {"id": str(entry_id)})
 
         cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -203,47 +217,141 @@ static jj_rest *test_open(const char *base, const char *agent, char *error, size
 #define main gtkjj_main
 #include "gtk/gtkjj.c"
 #undef main
+static gboolean answer_delete(gpointer accept)
+{
+    GList *windows = gtk_window_list_toplevels();
+    for (GList *item = windows; item; item = item->next) {
+        if (GTK_IS_MESSAGE_DIALOG(item->data)) {
+            gtk_dialog_response(GTK_DIALOG(item->data),
+                GPOINTER_TO_INT(accept) ? GTK_RESPONSE_ACCEPT : GTK_RESPONSE_CANCEL);
+            break;
+        }
+    }
+    g_list_free(windows);
+    return G_SOURCE_REMOVE;
+}
+static gboolean answer_relogin(gpointer accept)
+{
+    GList *windows = gtk_window_list_toplevels();
+    for (GList *item = windows; item; item = item->next) {
+        GtkWidget *dialog = item->data;
+        if (!GTK_IS_DIALOG(dialog) ||
+            strcmp(gtk_window_get_title(GTK_WINDOW(dialog)), "Session expired") != 0)
+            continue;
+        GList *children = gtk_container_get_children(GTK_CONTAINER(
+            gtk_dialog_get_content_area(GTK_DIALOG(dialog))));
+        for (GList *child = children; child; child = child->next) {
+            if (GTK_IS_ENTRY(child->data))
+                gtk_entry_set_text(GTK_ENTRY(child->data), "testpass");
+        }
+        g_list_free(children);
+        gtk_dialog_response(GTK_DIALOG(dialog), GPOINTER_TO_INT(accept) ?
+            GTK_RESPONSE_ACCEPT : GTK_RESPONSE_CANCEL);
+        break;
+    }
+    g_list_free(windows);
+    return G_SOURCE_REMOVE;
+}
 int main(int argc, char **argv)
 {
-    bool success = strcmp(argv[1], "success") == 0;
-    bool repeat = argc > 2 && strcmp(argv[2], "repeat") == 0;
+    const char *mode = argv[1];
+    bool large = g_str_has_prefix(mode, "large-");
+    gint64 expected_id = large ? G_GINT64_CONSTANT(5000000000) : 42;
     bool empty_metadata = argc > 2 && strcmp(argv[2], "empty-metadata") == 0;
-    const char *test_title = argc > 2 && !repeat && !empty_metadata ? "" : "GTK title";
-    const char *test_music = empty_metadata ? "" : "Artist - Song 雪";
-    const char *test_tags = empty_metadata ? " , ,  " : "C, UNIX  Gtk,, CAFÉ";
+    bool empty_title = argc > 2 && strcmp(argv[2], "empty-title") == 0;
+    Editor *editor;
+    GtkListBoxRow *row;
     gtk_init(&argc, &argv);
-    user = gtk_entry_new();
-    pass = gtk_entry_new();
-    title = gtk_entry_new();
-    music = gtk_entry_new();
-    tags = gtk_entry_new();
-    buffer = gtk_text_buffer_new(NULL);
-    gtk_entry_set_text(GTK_ENTRY(user), "testuser");
-    gtk_entry_set_text(GTK_ENTRY(pass), "testpass");
-    for (int i = 0; i < (repeat ? 2 : 1); i++) {
-        const char *next_title = i == 0 ? test_title : "Second title";
-        const char *next_music = i == 0 ? test_music : "Second song";
-        const char *next_tags = i == 0 ? test_tags : "Later";
-        gtk_entry_set_text(GTK_ENTRY(title), next_title);
-        gtk_entry_set_text(GTK_ENTRY(music), next_music);
-        gtk_entry_set_text(GTK_ENTRY(tags), next_tags);
-        gtk_text_buffer_set_text(buffer, i == 0 ? "GTK body" : "Second body", -1);
-        button_clicked(NULL, NULL);
-        if (strcmp(gtk_entry_get_text(GTK_ENTRY(user)), "testuser") != 0 ||
-            strcmp(gtk_entry_get_text(GTK_ENTRY(pass)), "testpass") != 0)
-            return 1;
-        if (success) {
-            if (gtk_text_buffer_get_char_count(buffer) != 0 ||
-                strlen(gtk_entry_get_text(GTK_ENTRY(title))) != 0 ||
-                strlen(gtk_entry_get_text(GTK_ENTRY(music))) != 0 ||
-                strlen(gtk_entry_get_text(GTK_ENTRY(tags))) != 0)
-                return 1;
-        } else {
-            return gtk_text_buffer_get_char_count(buffer) > 0 &&
-                strcmp(gtk_entry_get_text(GTK_ENTRY(title)), next_title) == 0 &&
-                strcmp(gtk_entry_get_text(GTK_ENTRY(music)), next_music) == 0 &&
-                strcmp(gtk_entry_get_text(GTK_ENTRY(tags)), next_tags) == 0 ? 0 : 1;
+    create_main_window();
+    if (strcmp(gtk_stack_get_visible_child_name(GTK_STACK(app.stack)), "login") != 0)
+        return 1;
+    gtk_entry_set_text(GTK_ENTRY(app.username_entry), "testuser");
+    gtk_entry_set_text(GTK_ENTRY(app.password_entry), "testpass");
+    login_clicked(NULL, NULL);
+    if (gtk_entry_get_text(GTK_ENTRY(app.password_entry))[0] != '\\0')
+        return 2;
+    if (strcmp(mode, "login-fail") == 0)
+        return app.client == NULL &&
+            strcmp(gtk_stack_get_visible_child_name(GTK_STACK(app.stack)), "login") == 0 ? 0 : 3;
+    if (!app.client || strcmp(gtk_stack_get_visible_child_name(GTK_STACK(app.stack)), "entries") != 0 ||
+        json_array_size(app.entries) != 1)
+        return 4;
+    row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(app.entry_list), 0);
+    if (!row || *(gint64 *)g_object_get_data(G_OBJECT(row), "entry-id") != expected_id)
+        return 5;
+    GList *labels = gtk_container_get_children(GTK_CONTAINER(gtk_bin_get_child(GTK_BIN(row))));
+    const char *heading = gtk_label_get_text(GTK_LABEL(labels->data));
+    const char *body_text = gtk_label_get_text(GTK_LABEL(labels->next->data));
+    if (!strstr(heading, "2026-10-26T12:30:00Z") || !strstr(heading, "Title \\"one\\"") ||
+        strcmp(body_text, "Body\\n雪") != 0)
+        return 9;
+    if (strcmp(mode, "select-click") == 0) {
+        GtkWidget *content = GTK_WIDGET(labels->next->data);
+        gint x, y, origin_x, origin_y, status;
+        while (gtk_events_pending())
+            gtk_main_iteration();
+        if (!gtk_widget_translate_coordinates(content, app.window,
+                gtk_widget_get_allocated_width(content) / 2,
+                gtk_widget_get_allocated_height(content) / 2, &x, &y))
+            return 10;
+        gdk_window_get_origin(gtk_widget_get_window(app.window), &origin_x, &origin_y);
+        gchar *screen_x = g_strdup_printf("%d", origin_x + x);
+        gchar *screen_y = g_strdup_printf("%d", origin_y + y);
+        gchar *click[] = {"xdotool", "mousemove", "--sync", screen_x, screen_y, "click", "1", NULL};
+        gboolean sent = g_spawn_sync(NULL, click, NULL, G_SPAWN_SEARCH_PATH,
+            NULL, NULL, NULL, NULL, &status, NULL);
+        g_free(screen_x);
+        g_free(screen_y);
+        if (!sent || status != 0)
+            return 10;
+        for (int attempt = 0; attempt < 20 && selected_entry_id() == 0; attempt++) {
+            g_main_context_iteration(NULL, FALSE);
+            g_usleep(50000);
         }
+        return selected_entry_id() == expected_id &&
+            gtk_widget_get_sensitive(app.edit_button) &&
+            gtk_widget_get_sensitive(app.delete_button) ? 0 : 11;
+    }
+    g_list_free(labels);
+    if (strcmp(mode, "view") == 0 || strcmp(mode, "large-view") == 0)
+        return 0;
+    if (strcmp(mode, "delete") == 0 || strcmp(mode, "large-delete") == 0 ||
+        strcmp(mode, "delete-cancel") == 0) {
+        gtk_list_box_select_row(GTK_LIST_BOX(app.entry_list), row);
+        g_idle_add(answer_delete, GINT_TO_POINTER(strcmp(mode, "delete-cancel") != 0));
+        delete_clicked(NULL, NULL);
+        return 0;
+    }
+    bool editing = strcmp(mode, "edit") == 0 || strcmp(mode, "large-edit") == 0 ||
+        strcmp(mode, "edit-expired") == 0 || strcmp(mode, "edit-expired-cancel") == 0 ||
+        strcmp(mode, "edit-proxy-html") == 0;
+    editor = open_editor(editing ? expected_id : 0);
+    if (editing &&
+        (strcmp(gtk_entry_get_text(GTK_ENTRY(editor->title)), "Title \\"one\\"") != 0 ||
+         strcmp(gtk_entry_get_text(GTK_ENTRY(editor->music)), "Existing music") != 0 ||
+         strcmp(gtk_entry_get_text(GTK_ENTRY(editor->tags)), "existing") != 0 ||
+         gtk_text_buffer_get_char_count(editor->body) == 0))
+        return 7;
+    gtk_entry_set_text(GTK_ENTRY(editor->title), empty_title ? "" : "GTK title");
+    gtk_entry_set_text(GTK_ENTRY(editor->music), empty_metadata ? "" : "Artist - Song 雪");
+    gtk_entry_set_text(GTK_ENTRY(editor->tags), empty_metadata ? " , , " : "C, UNIX  Gtk,, CAFÉ");
+    gtk_text_buffer_set_text(editor->body, "GTK body", -1);
+    if (g_str_has_prefix(mode, "edit-expired"))
+        g_idle_add(answer_relogin, GINT_TO_POINTER(strcmp(mode, "edit-expired") == 0));
+    editor_saved(NULL, editor);
+    if (strcmp(mode, "edit-expired-cancel") == 0 || strcmp(mode, "edit-proxy-html") == 0)
+        return gtk_text_buffer_get_char_count(editor->body) == 8 &&
+            gtk_widget_get_visible(editor->window) ? 0 : 12;
+    if (strcmp(mode, "post-fail") == 0)
+        return gtk_text_buffer_get_char_count(editor->body) > 0 &&
+            strcmp(gtk_entry_get_text(GTK_ENTRY(editor->title)), "GTK title") == 0 ? 0 : 8;
+    if (strcmp(mode, "repeat") == 0) {
+        editor = open_editor(0);
+        gtk_entry_set_text(GTK_ENTRY(editor->title), "Second title");
+        gtk_entry_set_text(GTK_ENTRY(editor->music), "Second song");
+        gtk_entry_set_text(GTK_ENTRY(editor->tags), "Later");
+        gtk_text_buffer_set_text(editor->body, "Second body", -1);
+        editor_saved(NULL, editor);
     }
     return 0;
 }
@@ -269,6 +377,7 @@ int main(int argc, char **argv)
     def setUp(self):
         type(self).requests = []
         type(self).mode = "ok"
+        type(self).login_count = 0
 
     def cli_run(self, *args, body="Body\n雪", ok=True):
         result = subprocess.run([str(self.cli), "-u", "testuser", "-p", "testpass", *args], input=body, capture_output=True, text=True, timeout=15)
@@ -636,9 +745,22 @@ sys.exit(status if status >= 0 else 128 - status)
         self.assertEqual(result.stdout, "")
         self.assertIn("invalid entry ID", result.stderr)
 
+    def test_large_entry_ids(self):
+        type(self).mode = "large_id"
+        result = self.cli_run("-r", "--show-ids")
+        self.assertIn("id=5000000000", result.stdout)
+        type(self).requests = []
+        self.cli_run("--edit", "5000000000", body="Updated body")
+        self.assertEqual([r[0] for r in self.requests],
+                         ["/api/login", "/api/entry/testuser/eid/5000000000", "/api/entry"])
+        self.assertEqual(self.requests[-1][2]["entryId"], 5000000000)
+        type(self).requests = []
+        self.cli_run("--delete", "5000000000")
+        self.assertEqual([r[0] for r in self.requests], ["/api/login", "/api/entry/5000000000"])
+
     def test_entry_action_option_errors_do_not_send_requests(self):
         cases = (("--show-ids",), ("--edit", "0"), ("--delete", "-1"),
-                 ("--edit", "42x"), ("--delete", "2147483648"),
+                 ("--edit", "42x"), ("--delete", "9223372036854775808"),
                  ("--edit", "42", "--delete", "42"),
                  ("-r", "--edit", "42"), ("-r", "--delete", "42"),
                  ("--delete", "42", "-s", "title"),
@@ -742,37 +864,34 @@ sys.exit(status if status >= 0 else 128 - status)
     def test_gtk_multiple_submissions_keep_credentials(self):
         if not self.gtk:
             self.skipTest("GTK 3 and Xvfb are required for GUI callback tests")
-        result = subprocess.run([str(self.gtk), "success", "repeat"], env=self.gui_env, capture_output=True, text=True, timeout=15)
+        result = subprocess.run([str(self.gtk), "repeat"], env=self.gui_env, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([request[0] for request in self.requests],
-                         ["/api/login", "/api/entry", "/api/login", "/api/entry"])
-        self.assertEqual(self.requests[2][2], {"username": "testuser", "password": "testpass"})
-        self.assertEqual(self.requests[3][2]["subject"], "Second title")
-        self.assertEqual(self.requests[3][2]["body"], "Second body")
-        self.assertEqual(self.requests[1][2]["music"], "Artist - Song 雪")
-        self.assertEqual(self.requests[1][2]["tags"], ["c", "unix", "gtk", "café"])
-        self.assertEqual(self.requests[1][2]["security"], 2)
-        self.assertEqual(self.requests[1][2]["format"], "TEXT")
-        self.assertIs(self.requests[1][2]["autoFormat"], True)
-        self.assertNotIn("date", self.requests[1][2])
-        self.assertEqual(self.requests[3][2]["music"], "Second song")
-        self.assertEqual(self.requests[3][2]["tags"], ["later"])
+                         ["/api/login", "/api/entry/testuser/size/20/page/0",
+                          "/api/entry", "/api/entry/testuser/size/20/page/0",
+                          "/api/entry", "/api/entry/testuser/size/20/page/0"])
+        self.assertEqual(self.requests[2][2]["music"], "Artist - Song 雪")
+        self.assertEqual(self.requests[2][2]["tags"], ["c", "unix", "gtk", "café"])
+        self.assertEqual(self.requests[4][2]["subject"], "Second title")
+        self.assertEqual(self.requests[4][2]["body"], "Second body")
+        self.assertEqual(self.requests[4][2]["tags"], ["later"])
+        self.assertEqual(self.requests[4][1]["Cookie"], "JSESSIONID=test-session")
 
     def test_gtk_empty_music_and_tags(self):
         if not self.gtk:
             self.skipTest("GTK 3 and Xvfb are required for GUI callback tests")
-        result = subprocess.run([str(self.gtk), "success", "empty-metadata"], env=self.gui_env, capture_output=True, text=True, timeout=15)
+        result = subprocess.run([str(self.gtk), "post", "empty-metadata"], env=self.gui_env, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.requests[-1][2]["music"], "")
-        self.assertEqual(self.requests[-1][2]["tags"], [])
+        self.assertEqual(self.requests[2][2]["music"], "")
+        self.assertEqual(self.requests[2][2]["tags"], [])
 
     def test_gtk_optional_title(self):
         if not self.gtk:
             self.skipTest("GTK 3 and Xvfb are required for GUI callback tests")
-        result = subprocess.run([str(self.gtk), "success", "empty-title"], env=self.gui_env, capture_output=True, text=True, timeout=15)
+        result = subprocess.run([str(self.gtk), "post", "empty-title"], env=self.gui_env, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.requests[-1][2]["subject"], "")
-        self.assertEqual(self.requests[-1][2]["body"], "GTK body")
+        self.assertEqual(self.requests[2][2]["subject"], "")
+        self.assertEqual(self.requests[2][2]["body"], "GTK body")
 
     def test_gtk_success_and_failure_drafts(self):
         if not self.gtk:
@@ -780,13 +899,118 @@ sys.exit(status if status >= 0 else 128 - status)
         for mode in ("ok", "unauthorized", "post_fail", "post_error", "post_invalid", "login_500", "post_500"):
             with self.subTest(mode=mode):
                 type(self).mode = mode
-                result = subprocess.run([str(self.gtk), "success" if mode == "ok" else "failure"], env=self.gui_env, capture_output=True, text=True, timeout=15)
+                type(self).requests = []
+                ui_mode = "login-fail" if mode in ("unauthorized", "login_500") else (
+                    "post-fail" if mode != "ok" else "post")
+                result = subprocess.run([str(self.gtk), ui_mode], env=self.gui_env, capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 if mode == "ok":
-                    self.assertEqual(self.requests[-1][2]["subject"], "GTK title")
-                    self.assertEqual(self.requests[-1][2]["body"], "GTK body")
-                    self.assertEqual(self.requests[-1][2]["music"], "Artist - Song 雪")
-                    self.assertEqual(self.requests[-1][2]["tags"], ["c", "unix", "gtk", "café"])
+                    self.assertEqual(self.requests[2][2]["subject"], "GTK title")
+                    self.assertEqual(self.requests[2][2]["body"], "GTK body")
+
+    def test_gtk_view_edit_and_delete(self):
+        if not self.gtk:
+            self.skipTest("GTK 3 and Xvfb are required for GUI callback tests")
+        for mode in ("view", "edit", "delete"):
+            with self.subTest(mode=mode):
+                type(self).requests = []
+                result = subprocess.run([str(self.gtk), mode], env=self.gui_env,
+                                        capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                if mode == "edit":
+                    self.assertEqual([r[0] for r in self.requests],
+                                     ["/api/login", "/api/entry/testuser/size/20/page/0",
+                                      "/api/entry/testuser/eid/42", "/api/entry",
+                                      "/api/entry/testuser/size/20/page/0"])
+                    update = self.requests[3][2]
+                    self.assertEqual(update["entryId"], 42)
+                    self.assertEqual(update["subject"], "GTK title")
+                    self.assertEqual(update["body"], "GTK body")
+                    self.assertEqual(update["music"], "Artist - Song 雪")
+                    self.assertEqual(update["tags"], ["c", "unix", "gtk", "café"])
+                    self.assertEqual(update["security"], 1)
+                    self.assertEqual(update["format"], "MARKDOWN")
+                if mode == "delete":
+                    self.assertEqual([r[0] for r in self.requests],
+                                     ["/api/login", "/api/entry/testuser/size/20/page/0",
+                                      "/api/entry/42", "/api/entry/testuser/size/20/page/0"])
+
+    def test_gtk_large_ids_and_delete_cancel(self):
+        if not self.gtk:
+            self.skipTest("GTK 3 and Xvfb are required for GUI callback tests")
+        for mode in ("large-view", "large-edit", "large-delete", "delete-cancel"):
+            with self.subTest(mode=mode):
+                type(self).mode = "large_id" if mode.startswith("large-") else "ok"
+                type(self).requests = []
+                result = subprocess.run([str(self.gtk), mode], env=self.gui_env,
+                                        capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                paths = [r[0] for r in self.requests]
+                if mode == "large-edit":
+                    self.assertIn("/api/entry/testuser/eid/5000000000", paths)
+                    self.assertEqual(self.requests[-2][2]["entryId"], 5000000000)
+                elif mode == "large-delete":
+                    self.assertIn("/api/entry/5000000000", paths)
+                elif mode == "delete-cancel":
+                    self.assertNotIn("/api/entry/42", paths)
+
+    def test_gtk_edit_can_clear_music_and_tags(self):
+        if not self.gtk:
+            self.skipTest("GTK 3 and Xvfb are required for GUI callback tests")
+        result = subprocess.run([str(self.gtk), "edit", "empty-metadata"],
+                                env=self.gui_env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        update = self.requests[3][2]
+        self.assertEqual(update["music"], "")
+        self.assertEqual(update["tags"], [])
+
+    def test_gtk_edit_reauthenticates_without_losing_changes(self):
+        if not self.gtk:
+            self.skipTest("GTK 3 and Xvfb are required for GUI callback tests")
+        type(self).mode = "edit_expired"
+        result = subprocess.run([str(self.gtk), "edit-expired"], env=self.gui_env,
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([r[0] for r in self.requests],
+                         ["/api/login", "/api/entry/testuser/size/20/page/0",
+                          "/api/entry/testuser/eid/42", "/api/entry", "/api/login",
+                          "/api/entry/testuser/eid/42", "/api/entry",
+                          "/api/entry/testuser/size/20/page/0"])
+        self.assertEqual(self.requests[3][2], self.requests[6][2])
+        self.assertEqual(self.requests[6][2]["body"], "GTK body")
+        self.assertEqual(self.requests[6][1]["Cookie"], "JSESSIONID=renewed-session")
+
+    def test_gtk_edit_reauthentication_cancel_keeps_editor(self):
+        if not self.gtk:
+            self.skipTest("GTK 3 and Xvfb are required for GUI callback tests")
+        type(self).mode = "edit_expired_cancel"
+        result = subprocess.run([str(self.gtk), "edit-expired-cancel"], env=self.gui_env,
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([r[0] for r in self.requests],
+                         ["/api/login", "/api/entry/testuser/size/20/page/0",
+                          "/api/entry/testuser/eid/42", "/api/entry"])
+
+    def test_proxy_403_does_not_prompt_for_password(self):
+        type(self).mode = "edit_proxy_html"
+        result = self.cli_run("--edit", "42", ok=False)
+        self.assertIn("web server refused PUT (HTTP 403)", result.stderr)
+        if not self.gtk:
+            self.skipTest("GTK 3 and Xvfb are required for GUI callback tests")
+        type(self).requests = []
+        result = subprocess.run([str(self.gtk), "edit-proxy-html"], env=self.gui_env,
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([r[0] for r in self.requests],
+                         ["/api/login", "/api/entry/testuser/size/20/page/0",
+                          "/api/entry/testuser/eid/42", "/api/entry"])
+
+    def test_gtk_click_selects_entry(self):
+        if not self.gtk or not shutil.which("xdotool"):
+            self.skipTest("GTK 3, Xvfb, and xdotool are required for pointer test")
+        result = subprocess.run([str(self.gtk), "select-click"], env=self.gui_env,
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

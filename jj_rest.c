@@ -1,6 +1,7 @@
 #include "jj_rest.h"
 
 #include <curl/curl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,6 +14,7 @@ struct jj_rest {
     CURL *curl;
     struct curl_slist *headers;
     char *base_url;
+    bool last_auth_failure;
 };
 
 struct response {
@@ -57,6 +59,11 @@ void jj_rest_close(jj_rest *client)
     free(client->base_url);
     free(client);
     curl_global_cleanup();
+}
+
+bool jj_rest_last_auth_failure(const jj_rest *client)
+{
+    return client && client->last_auth_failure;
 }
 
 jj_rest *jj_rest_open(const char *base_url, const char *agent,
@@ -128,6 +135,7 @@ static json_t *request_body(jj_rest *client, const char *path, const char *body,
         method && strcmp(method, "PUT") == 0 ? "Updating entry" :
         body ? "Saving entry" : "Loading entries";
 
+    client->last_auth_failure = false;
     snprintf(error, error_size, "%s failed: unable to prepare REST request.", operation);
     url = malloc(strlen(client->base_url) + strlen(path) + 1);
     if (!url)
@@ -155,10 +163,19 @@ static json_t *request_body(jj_rest *client, const char *path, const char *body,
     if (curl_easy_getinfo(client->curl, CURLINFO_RESPONSE_CODE, &status) != CURLE_OK)
         goto cleanup;
     if (status < 200 || status >= 300) {
-        if (status == 401 || status == 403)
+        json_t *problem = json_loadb(response.data ? response.data : "", response.size,
+            JSON_REJECT_DUPLICATES, NULL);
+        const char *server_error = json_is_object(problem) ?
+            json_string_value(json_object_get(problem, "error")) : NULL;
+        client->last_auth_failure = status == 403 && server_error &&
+            strcmp(server_error, "The login timed out or is invalid.") == 0;
+        if (client->last_auth_failure || status == 401)
             snprintf(error, error_size, "%s failed: authentication failed or session expired (HTTP %ld).", operation, status);
+        else if (status == 403 && method && strcmp(method, "PUT") == 0 && !problem)
+            snprintf(error, error_size, "%s failed: web server refused PUT (HTTP 403).", operation);
         else
             snprintf(error, error_size, "%s failed (HTTP %ld).", operation, status);
+        json_decref(problem);
         goto cleanup;
     }
     result = json_loadb(response.data ? response.data : "", response.size,
@@ -499,13 +516,13 @@ json_t *jj_rest_recent(jj_rest *client, const char *username, size_t count,
     return entries;
 }
 
-static bool response_matches_id(json_t *result, int entry_id,
+static bool response_matches_id(json_t *result, int64_t entry_id,
     char *error, size_t error_size)
 {
     char expected[32];
     const char *actual = json_string_value(json_object_get(result, "id"));
 
-    snprintf(expected, sizeof(expected), "%d", entry_id);
+    snprintf(expected, sizeof(expected), "%" PRId64, entry_id);
     if (!actual || strcmp(actual, expected) != 0) {
         snprintf(error, error_size, "Server did not confirm entry %s.", expected);
         return false;
@@ -513,10 +530,11 @@ static bool response_matches_id(json_t *result, int entry_id,
     return true;
 }
 
-bool jj_rest_edit(jj_rest *client, const char *username, int entry_id,
+static bool edit_entry(jj_rest *client, const char *username, int64_t entry_id,
     const char *subject, const char *body, bool subject_set,
     const jj_entry_options *options, bool date_set, bool security_set,
-    bool format_set, char *error, size_t error_size)
+    bool format_set, const char *music, json_t *tags,
+    char *error, size_t error_size)
 {
     char *escaped = curl_easy_escape(client->curl, username, 0);
     char *path;
@@ -533,7 +551,7 @@ bool jj_rest_edit(jj_rest *client, const char *username, int entry_id,
         snprintf(error, error_size, "Unable to prepare entry request.");
         return false;
     }
-    snprintf(path, strlen(escaped) + 64, "/api/entry/%s/eid/%d", escaped, entry_id);
+    snprintf(path, strlen(escaped) + 64, "/api/entry/%s/eid/%" PRId64, escaped, entry_id);
     curl_free(escaped);
     entry = request(client, path, NULL, error, error_size);
     free(path);
@@ -562,7 +580,9 @@ bool jj_rest_edit(jj_rest *client, const char *username, int entry_id,
         (date_set && json_object_set_new(entry, "date", json_string(options->date)) != 0) ||
         (security_set && json_object_set_new(entry, "security", json_integer(options->security)) != 0) ||
         (format_set && (json_object_set_new(entry, "format", json_string(options->format)) != 0 ||
-            json_object_set_new(entry, "autoFormat", json_boolean(strcmp(options->format, "TEXT") == 0)) != 0))) {
+            json_object_set_new(entry, "autoFormat", json_boolean(strcmp(options->format, "TEXT") == 0)) != 0)) ||
+        (music && json_object_set_new(entry, "music", json_string(music)) != 0) ||
+        (tags && (!json_is_array(tags) || json_object_set(entry, "tags", tags) != 0))) {
         snprintf(error, error_size, "Unable to prepare entry update.");
         goto cleanup;
     }
@@ -576,13 +596,30 @@ cleanup:
     return ok;
 }
 
-bool jj_rest_delete(jj_rest *client, int entry_id, char *error, size_t error_size)
+bool jj_rest_edit(jj_rest *client, const char *username, int64_t entry_id,
+    const char *subject, const char *body, bool subject_set,
+    const jj_entry_options *options, bool date_set, bool security_set,
+    bool format_set, char *error, size_t error_size)
+{
+    return edit_entry(client, username, entry_id, subject, body, subject_set,
+        options, date_set, security_set, format_set, NULL, NULL, error, error_size);
+}
+
+bool jj_rest_edit_with_metadata(jj_rest *client, const char *username, int64_t entry_id,
+    const char *subject, const char *body, const char *music, json_t *tags,
+    char *error, size_t error_size)
+{
+    return edit_entry(client, username, entry_id, subject, body, true,
+        NULL, false, false, false, music, tags, error, error_size);
+}
+
+bool jj_rest_delete(jj_rest *client, int64_t entry_id, char *error, size_t error_size)
 {
     char path[64];
     json_t *result;
     bool ok;
 
-    snprintf(path, sizeof(path), "/api/entry/%d", entry_id);
+    snprintf(path, sizeof(path), "/api/entry/%" PRId64, entry_id);
     result = request_method(client, path, NULL, "DELETE", error, error_size);
     if (!result)
         return false;

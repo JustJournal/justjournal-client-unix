@@ -152,13 +152,20 @@ This client additionally requires GTK 3 to build.
 Install gtk3 on MidnightBSD/FreeBSD, or libgtk-3-dev on Debian/Ubuntu,
 in addition to the dependencies above.
 
-The optional Title field sets the entry subject separately from the body.
-Music accepts the current artist/song; Tags accepts tags separated by spaces or commas and converts them
-to lowercase, matching the website. Empty tags are ignored.
+The first screen asks for a username and password. After login, the main view
+shows the latest 20 entries with their IDs, dates, subjects, and bodies. Use
+Refresh to reload the list, or select an entry to edit or delete it. Deletion
+asks for confirmation because it also removes the entry's comments. Add Entry
+opens a separate posting window.
 
-Failed requests retain all fields so you can correct the problem and retry.
-A successful post clears the title, music, tags, and entry body, keeping your
-username and password filled in for the next post.
+The add and edit windows provide title, music, tags, and body fields. Tags are
+separated by spaces or commas and converted to lowercase, matching the website;
+empty tags are ignored. Editing preserves the entry's date, visibility, format,
+draft state, and other settings. Failed saves leave the window and its fields
+open for correction. A successful save closes that window and refreshes the
+recent list. The password field is cleared after login; the authenticated
+session stays in memory until the app closes. If the session expires while an
+edit is open, saving prompts for the password again and keeps the edited text.
 
 ### Available gtkjj packages
 
@@ -176,8 +183,8 @@ cmake --install build
 ```
 
 This builds and installs both clients. The graphical executable is
-`build/gtkjj`. GTK is disabled by default, so CLI-only builds do not require
-GTK development files.
+`build/gtkjj`. It also installs a JustJournal application menu entry. GTK is
+disabled by default, so CLI-only builds do not require GTK development files.
 
 For GTK-only packaging, build the `gtkjj` target and install the `gtk`
 component:

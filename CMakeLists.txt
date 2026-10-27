@@ -43,6 +43,7 @@ if(BUILD_GTK)
     target_compile_options(gtkjj PRIVATE -Wall -pedantic)
     target_compile_definitions(gtkjj PRIVATE _DEFAULT_SOURCE)
     install(TARGETS gtkjj RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT gtk)
+    install(FILES gtk/gtkjj.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications COMPONENT gtk)
 endif()
 
 include(CTest)

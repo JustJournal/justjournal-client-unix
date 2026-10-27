@@ -41,6 +41,7 @@ SUCH DAMAGE.
 #include <getopt.h>
 #include <errno.h>
 #include <limits.h>
+#include <inttypes.h>
 #include <ctype.h>
 #include <netdb.h>
 #include <sys/socket.h>
@@ -159,10 +160,22 @@ static bool parse_password_fd(const char *input, int *fd)
     return true;
 }
 
-static bool parse_entry_id(const char *input, int *id)
+static bool parse_entry_id(const char *input, int64_t *id)
 {
-    if (!parse_password_fd(input, id) || *id < 1)
+    const char *p;
+    char *end;
+    intmax_t value;
+
+    if (!input || !*input)
         return false;
+    for (p = input; *p; p++)
+        if (*p < '0' || *p > '9')
+            return false;
+    errno = 0;
+    value = strtoimax(input, &end, 10);
+    if (errno || *end || value < 1 || value > INT64_MAX)
+        return false;
+    *id = (int64_t)value;
     return true;
 }
 
@@ -191,7 +204,7 @@ int main(int argc, char *argv[])
     bool security_set = false;
     bool format_set = false;
     bool fdflag = false;
-    int entry_id = 0;
+    int64_t entry_id = 0;
     int password_fd = -1;
     jj_entry_options post_options = JJ_ENTRY_OPTIONS_INIT;
     bool post_option_set = false;
@@ -529,13 +542,12 @@ static bool getRecentPosts(jj_rest *client, const char *username, bool show_ids,
         json_t *entry = json_array_get(entries, i);
         json_t *id = json_object_get(entry, "entryId");
         if (show_ids) {
-            if (!json_is_integer(id) || json_integer_value(id) < 1 ||
-                json_integer_value(id) > INT_MAX) {
+            if (!json_is_integer(id) || json_integer_value(id) < 1) {
                 snprintf(error, error_size, "Server returned an invalid entry ID.");
                 json_decref(entries);
                 return false;
             }
-            printf("id=%lld ", (long long)json_integer_value(id));
+            printf("id=%" PRId64 " ", (int64_t)json_integer_value(id));
         }
         printf("%zu ", i);
         print_terminal_text(json_object_get(entry, "date"));
