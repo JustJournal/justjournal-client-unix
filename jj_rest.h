@@ -32,5 +32,10 @@ bool jj_rest_post_with_options(jj_rest *client, const char *subject, const char 
     char *error, size_t error_size);
 json_t *jj_rest_recent(jj_rest *client, const char *username, size_t count,
     char *error, size_t error_size);
+bool jj_rest_edit(jj_rest *client, const char *username, int entry_id,
+    const char *subject, const char *body, bool subject_set,
+    const jj_entry_options *options, bool date_set, bool security_set,
+    bool format_set, char *error, size_t error_size);
+bool jj_rest_delete(jj_rest *client, int entry_id, char *error, size_t error_size);
 
 #endif

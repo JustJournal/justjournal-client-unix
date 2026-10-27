@@ -33,6 +33,9 @@
 .Nm
 .Op Fl d
 .Op Fl r
+.Op Fl -show-ids
+.Op Fl -edit Ar entry-id
+.Op Fl -delete Ar entry-id
 .Op Fl h Ar hostname
 .Op Fl u Ar username
 .Op Fl p Ar password
@@ -74,6 +77,23 @@ Debug login and posting problems.
 Print the date, subject, and body of the latest 20 entries for the authenticated
 account, including private entries and drafts, instead of reading an entry
 from standard input or posting it.
+.It Fl -show-ids
+With
+.Fl r ,
+print each entry's server ID before its list number.
+.It Fl -edit Ar entry-id
+Replace the body of an existing entry with standard input.
+The subject, date,
+visibility, format, tags, and other settings are retained unless overridden
+with
+.Fl s ,
+.Fl -date ,
+.Fl -security ,
+or
+.Fl -format .
+.It Fl -delete Ar entry-id
+Delete an entry and its comments.
+Standard input is not read.
 .It Fl h
 Specify the host to connect to.
 .It Fl u
@@ -135,6 +155,17 @@ and cannot be combined with
 .Pp
 Password input through environment variables is not supported.
 .Sh EXAMPLES
+List recent entries with IDs, then edit one:
+.Bd -literal -offset indent
+jjclient -u username -r --show-ids
+jjclient -u username --edit 123 < revised-entry.txt
+.Ed
+.Pp
+Delete an entry by ID:
+.Bd -literal -offset indent
+jjclient -u username --delete 123
+.Ed
+.Pp
 Prompt for a password while reading the entry from a file:
 .Bd -literal -offset indent
 jjclient -u username -s 'My title' < entry.txt
