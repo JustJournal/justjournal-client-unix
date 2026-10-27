@@ -115,6 +115,7 @@ failure:
 
 /* The caller owns body and erases it after this function stops using it. */
 static json_t *request_body(jj_rest *client, const char *path, const char *body,
+    const char *method,
     char *error, size_t error_size)
 {
     struct response response = {NULL, 0};
@@ -123,6 +124,8 @@ static json_t *request_body(jj_rest *client, const char *path, const char *body,
     long status = 0;
     CURLcode code;
     const char *operation = strcmp(path, "/api/login") == 0 ? "Login" :
+        method && strcmp(method, "DELETE") == 0 ? "Deleting entry" :
+        method && strcmp(method, "PUT") == 0 ? "Updating entry" :
         body ? "Saving entry" : "Loading entries";
 
     snprintf(error, error_size, "%s failed: unable to prepare REST request.", operation);
@@ -140,7 +143,8 @@ static json_t *request_body(jj_rest *client, const char *path, const char *body,
         curl_easy_setopt(client->curl, CURLOPT_POSTFIELDS, body) != CURLE_OK ||
         curl_easy_setopt(client->curl, CURLOPT_POSTFIELDSIZE,
             body ? (long)strlen(body) : 0L) != CURLE_OK ||
-        curl_easy_setopt(client->curl, CURLOPT_HTTPGET, body ? 0L : 1L) != CURLE_OK)
+        curl_easy_setopt(client->curl, CURLOPT_HTTPGET, body ? 0L : 1L) != CURLE_OK ||
+        curl_easy_setopt(client->curl, CURLOPT_CUSTOMREQUEST, method) != CURLE_OK)
         goto cleanup;
 
     code = curl_easy_perform(client->curl);
@@ -165,13 +169,15 @@ static json_t *request_body(jj_rest *client, const char *path, const char *body,
 cleanup:
     /* Do not leave libcurl pointing into the login payload after it is erased. */
     curl_easy_setopt(client->curl, CURLOPT_POSTFIELDS, NULL);
+    curl_easy_setopt(client->curl, CURLOPT_CUSTOMREQUEST, NULL);
     curl_easy_setopt(client->curl, CURLOPT_WRITEDATA, NULL);
     free(url);
     free(response.data);
     return result;
 }
 
-static json_t *request(jj_rest *client, const char *path, json_t *payload,
+static json_t *request_method(jj_rest *client, const char *path, json_t *payload,
+    const char *method,
     char *error, size_t error_size)
 {
     char *body = payload ? json_dumps(payload, JSON_COMPACT) : NULL;
@@ -181,12 +187,18 @@ static json_t *request(jj_rest *client, const char *path, json_t *payload,
         snprintf(error, error_size, "Unable to encode request as UTF-8 JSON.");
         return NULL;
     }
-    result = request_body(client, path, body, error, error_size);
+    result = request_body(client, path, body, method, error, error_size);
     if (body) {
         wipe(body, strlen(body));
         free(body);
     }
     return result;
+}
+
+static json_t *request(jj_rest *client, const char *path, json_t *payload,
+    char *error, size_t error_size)
+{
+    return request_method(client, path, payload, NULL, error, error_size);
 }
 
 /* Write one JSON string directly, validating UTF-8 without allocating copies. */
@@ -294,7 +306,7 @@ bool jj_rest_login(jj_rest *client, const char *username, const char *password,
         snprintf(error, error_size, "Unable to encode credentials as UTF-8 JSON.");
         return false;
     }
-    result = request_body(client, "/api/login", body, error, error_size);
+    result = request_body(client, "/api/login", body, NULL, error, error_size);
     wipe(body, capacity);
     free(body);
     if (!result)
@@ -485,4 +497,96 @@ json_t *jj_rest_recent(jj_rest *client, const char *username, size_t count,
         }
     }
     return entries;
+}
+
+static bool response_matches_id(json_t *result, int entry_id,
+    char *error, size_t error_size)
+{
+    char expected[32];
+    const char *actual = json_string_value(json_object_get(result, "id"));
+
+    snprintf(expected, sizeof(expected), "%d", entry_id);
+    if (!actual || strcmp(actual, expected) != 0) {
+        snprintf(error, error_size, "Server did not confirm entry %s.", expected);
+        return false;
+    }
+    return true;
+}
+
+bool jj_rest_edit(jj_rest *client, const char *username, int entry_id,
+    const char *subject, const char *body, bool subject_set,
+    const jj_entry_options *options, bool date_set, bool security_set,
+    bool format_set, char *error, size_t error_size)
+{
+    char *escaped = curl_easy_escape(client->curl, username, 0);
+    char *path;
+    json_t *entry, *security, *result;
+    bool ok = false;
+
+    if (!escaped) {
+        snprintf(error, error_size, "Unable to encode username.");
+        return false;
+    }
+    path = malloc(strlen(escaped) + 64);
+    if (!path) {
+        curl_free(escaped);
+        snprintf(error, error_size, "Unable to prepare entry request.");
+        return false;
+    }
+    snprintf(path, strlen(escaped) + 64, "/api/entry/%s/eid/%d", escaped, entry_id);
+    curl_free(escaped);
+    entry = request(client, path, NULL, error, error_size);
+    free(path);
+    if (!entry)
+        return false;
+    security = json_object_get(entry, "security");
+    if (json_is_object(security))
+        security = json_object_get(security, "id");
+    if (!json_is_object(entry) ||
+        !json_is_integer(json_object_get(entry, "entryId")) ||
+        json_integer_value(json_object_get(entry, "entryId")) != entry_id ||
+        !json_is_string(json_object_get(entry, "subject")) ||
+        !json_is_string(json_object_get(entry, "body")) ||
+        !json_is_string(json_object_get(entry, "date")) ||
+        !json_is_string(json_object_get(entry, "format")) ||
+        !json_is_integer(security) || json_integer_value(security) < 0 ||
+        json_integer_value(security) > 2 ||
+        !json_is_array(json_object_get(entry, "tags"))) {
+        snprintf(error, error_size, "Server returned an invalid entry for editing.");
+        goto cleanup;
+    }
+    if (json_object_set_new(entry, "security",
+            json_integer(json_integer_value(security))) != 0 ||
+        json_object_set_new(entry, "body", json_string(body)) != 0 ||
+        (subject_set && json_object_set_new(entry, "subject", json_string(subject)) != 0) ||
+        (date_set && json_object_set_new(entry, "date", json_string(options->date)) != 0) ||
+        (security_set && json_object_set_new(entry, "security", json_integer(options->security)) != 0) ||
+        (format_set && (json_object_set_new(entry, "format", json_string(options->format)) != 0 ||
+            json_object_set_new(entry, "autoFormat", json_boolean(strcmp(options->format, "TEXT") == 0)) != 0))) {
+        snprintf(error, error_size, "Unable to prepare entry update.");
+        goto cleanup;
+    }
+    result = request_method(client, "/api/entry", entry, "PUT", error, error_size);
+    if (result) {
+        ok = response_matches_id(result, entry_id, error, error_size);
+        json_decref(result);
+    }
+cleanup:
+    json_decref(entry);
+    return ok;
+}
+
+bool jj_rest_delete(jj_rest *client, int entry_id, char *error, size_t error_size)
+{
+    char path[64];
+    json_t *result;
+    bool ok;
+
+    snprintf(path, sizeof(path), "/api/entry/%d", entry_id);
+    result = request_method(client, path, NULL, "DELETE", error, error_size);
+    if (!result)
+        return false;
+    ok = response_matches_id(result, entry_id, error, error_size);
+    json_decref(result);
+    return ok;
 }

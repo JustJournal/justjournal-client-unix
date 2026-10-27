@@ -78,7 +78,8 @@ static inline void secure_bzero(void *s, size_t n) {
 #define RECENT_POST_COUNT 20
 
 static void usage(const char *name);
-static bool getRecentPosts(jj_rest *client, const char *username, char *error, size_t error_size);
+static bool getRecentPosts(jj_rest *client, const char *username, bool show_ids,
+    char *error, size_t error_size);
 
 static bool is_valid_hostname(const char *hostname);
 static bool is_valid_username(const char *input);
@@ -158,6 +159,13 @@ static bool parse_password_fd(const char *input, int *fd)
     return true;
 }
 
+static bool parse_entry_id(const char *input, int *id)
+{
+    if (!parse_password_fd(input, id) || *id < 1)
+        return false;
+    return true;
+}
+
 int main(int argc, char *argv[])
 {
     jj_rest *client;
@@ -175,7 +183,15 @@ int main(int argc, char *argv[])
     bool uflag = false;
     bool pflag = false;
     bool rflag = false;
+    bool show_ids = false;
+    bool edit = false;
+    bool delete = false;
+    bool subject_set = false;
+    bool date_set = false;
+    bool security_set = false;
+    bool format_set = false;
     bool fdflag = false;
+    int entry_id = 0;
     int password_fd = -1;
     jj_entry_options post_options = JJ_ENTRY_OPTIONS_INIT;
     bool post_option_set = false;
@@ -184,6 +200,9 @@ int main(int argc, char *argv[])
         {"date", required_argument, NULL, 257},
         {"security", required_argument, NULL, 258},
         {"format", required_argument, NULL, 259},
+        {"show-ids", no_argument, NULL, 260},
+        {"edit", required_argument, NULL, 261},
+        {"delete", required_argument, NULL, 262},
         {NULL, 0, NULL, 0}
     };
 
@@ -198,6 +217,7 @@ int main(int argc, char *argv[])
                 return EXIT_FAILURE;
             }
             post_options.date = optarg;
+            date_set = true;
             post_option_set = true;
             break;
 
@@ -214,6 +234,22 @@ int main(int argc, char *argv[])
                 return EXIT_FAILURE;
             }
             post_option_set = true;
+            security_set = true;
+            break;
+
+        case 260:
+            show_ids = true;
+            break;
+
+        case 261:
+        case 262:
+            if (!parse_entry_id(optarg, &entry_id)) {
+                fprintf(stderr, "Error: Entry ID must be a positive integer.\n");
+                secure_bzero(password, sizeof(password));
+                return EXIT_FAILURE;
+            }
+            if (c == 261) edit = true;
+            else delete = true;
             break;
 
         case 259:
@@ -229,6 +265,7 @@ int main(int argc, char *argv[])
                 return EXIT_FAILURE;
             }
             post_option_set = true;
+            format_set = true;
             break;
 
         case 256:
@@ -307,6 +344,7 @@ int main(int argc, char *argv[])
                 exit(EXIT_FAILURE);
             }
             (void)snprintf(title, sizeof(title), "%s", optarg);
+            subject_set = true;
             break;
 
         case 'r': /* recent entries */
@@ -324,6 +362,13 @@ int main(int argc, char *argv[])
         }
     }
     argc -= optind;
+
+    if ((show_ids && !rflag) || (rflag && (edit || delete)) ||
+        (edit && delete) || (delete && (subject_set || post_option_set))) {
+        fprintf(stderr, "Error: Conflicting entry actions or options.\n");
+        secure_bzero(password, sizeof(password));
+        return EXIT_FAILURE;
+    }
 
     if (rflag && post_option_set) {
         fprintf(stderr, "Error: --date, --security and --format cannot be used with -r\n");
@@ -383,7 +428,19 @@ int main(int argc, char *argv[])
         success = client && jj_rest_login(client, username, password, error, sizeof(error));
         secure_bzero(password, sizeof(password));
         if (success)
-            success = getRecentPosts(client, username, error, sizeof(error));
+            success = getRecentPosts(client, username, show_ids, error, sizeof(error));
+        jj_rest_close(client);
+        if (!success)
+            fprintf(stderr, "ERROR: %s\n", error);
+        return success ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    if (delete) {
+        client = jj_rest_open(host, NAME "/" VERSION, error, sizeof(error));
+        success = client && jj_rest_login(client, username, password, error, sizeof(error));
+        secure_bzero(password, sizeof(password));
+        if (success)
+            success = jj_rest_delete(client, entry_id, error, sizeof(error));
         jj_rest_close(client);
         if (!success)
             fprintf(stderr, "ERROR: %s\n", error);
@@ -418,8 +475,11 @@ int main(int argc, char *argv[])
     success = client && jj_rest_login(client, username, password, error, sizeof(error));
     secure_bzero(password, sizeof(password));
     if (success)
-        success = jj_rest_post_with_options(client, title, entry, NULL, NULL,
-            &post_options, error, sizeof(error));
+        success = edit ? jj_rest_edit(client, username, entry_id, title, entry,
+            subject_set, &post_options, date_set, security_set, format_set,
+            error, sizeof(error)) :
+            jj_rest_post_with_options(client, title, entry, NULL, NULL,
+                &post_options, error, sizeof(error));
     jj_rest_close(client);
     if (!success)
         fprintf(stderr, "ERROR: %s\n", error);
@@ -430,7 +490,7 @@ int main(int argc, char *argv[])
 
 static void usage(const char *name)
 {
-    fprintf(stderr, "jjclient %s\nusage: %s -u USERNAME [-p PASSWORD | --password-fd FD] [-h host] [-s subject] [-r] [-d]\n"
+    fprintf(stderr, "jjclient %s\nusage: %s -u USERNAME [-p PASSWORD | --password-fd FD] [-h host] [-s subject] [-r [--show-ids] | --edit ID | --delete ID] [-d]\n"
         "  [--date YYYY-MM-DDTHH:MM:SS[.sss](Z|+HH:MM|-HH:MM)]\n"
         "  [--security public|friends|private] [--format text|markdown|html]\n"
         "Without a password option, prompt on the controlling terminal with echo disabled.\n", VERSION, name);
@@ -458,7 +518,8 @@ static void print_terminal_text(const json_t *value)
     }
 }
 
-static bool getRecentPosts(jj_rest *client, const char *username, char *error, size_t error_size)
+static bool getRecentPosts(jj_rest *client, const char *username, bool show_ids,
+    char *error, size_t error_size)
 {
     json_t *entries = jj_rest_recent(client, username, RECENT_POST_COUNT, error, error_size);
     if (!entries)
@@ -466,6 +527,16 @@ static bool getRecentPosts(jj_rest *client, const char *username, char *error, s
     for (size_t i = 0; i < json_array_size(entries); i++)
     {
         json_t *entry = json_array_get(entries, i);
+        json_t *id = json_object_get(entry, "entryId");
+        if (show_ids) {
+            if (!json_is_integer(id) || json_integer_value(id) < 1 ||
+                json_integer_value(id) > INT_MAX) {
+                snprintf(error, error_size, "Server returned an invalid entry ID.");
+                json_decref(entries);
+                return false;
+            }
+            printf("id=%lld ", (long long)json_integer_value(id));
+        }
         printf("%zu ", i);
         print_terminal_text(json_object_get(entry, "date"));
         putchar(' ');

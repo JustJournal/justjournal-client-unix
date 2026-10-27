@@ -99,8 +99,22 @@ class RestTests(unittest.TestCase):
                 cls.requests.append((self.path, dict(self.headers), None))
                 if self.headers.get("Cookie") != "JSESSIONID=test-session":
                     return self.reply(403, {})
-                entries = [{"date": "2026-10-26T12:30:00Z",
+                if self.path == "/api/entry/testuser/eid/42":
+                    if cls.mode == "edit_bad_entry":
+                        return self.reply(200, {"entryId": 41})
+                    return self.reply(200, {
+                        "entryId": 42, "date": "2026-10-26T12:30:00Z",
+                        "subject": "Existing title", "body": "Existing body",
+                        "security": {"id": 1, "name": "friends"},
+                        "format": "MARKDOWN", "autoFormat": False,
+                        "allowComments": False, "emailComments": False,
+                        "draft": True, "mood": 19, "location": 3,
+                        "music": "Existing music", "trackback": "",
+                        "tags": ["existing"], "comments": []})
+                entries = [{"entryId": 42, "date": "2026-10-26T12:30:00Z",
                             "subject": 'Title "one"', "body": "Body\n雪"}]
+                if cls.mode == "recent_missing_id":
+                    del entries[0]["entryId"]
                 if cls.mode == "recent_controls":
                     controls = "".join(chr(c) for c in range(1, 32) if c not in (9, 10))
                     controls += chr(127) + "".join(chr(c) for c in range(128, 160))
@@ -123,6 +137,27 @@ class RestTests(unittest.TestCase):
                 if cls.mode == "recent_hal":
                     return self.reply(200, {"_embedded": {"entryToList": entries}, "page": {"totalElements": 1}})
                 return self.reply(200, {"content": entries, "page": {"totalElements": 1}})
+
+            def do_PUT(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                cls.requests.append((self.path, dict(self.headers), body))
+                if self.path != "/api/entry" or self.headers.get("Cookie") != "JSESSIONID=test-session":
+                    return self.reply(403, {})
+                if cls.mode == "edit_500":
+                    return self.reply(500, {"error": "failed"})
+                if cls.mode == "edit_wrong_id":
+                    return self.reply(200, {"id": "41"})
+                return self.reply(200, {"id": "42"})
+
+            def do_DELETE(self):
+                cls.requests.append((self.path, dict(self.headers), None))
+                if self.path != "/api/entry/42" or self.headers.get("Cookie") != "JSESSIONID=test-session":
+                    return self.reply(403, {})
+                if cls.mode == "delete_500":
+                    return self.reply(500, {"error": "failed"})
+                if cls.mode == "delete_wrong_id":
+                    return self.reply(200, {"id": "41"})
+                return self.reply(200, {"id": "42"})
 
         cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -588,6 +623,84 @@ sys.exit(status if status >= 0 else 128 - status)
         self.assertEqual(result.stdout.count("2026-10-26T12:30:00Z"), 20)
         self.assertIn("19 2026-10-26T12:30:00Z Title 19\n\nBody 19\n\n", result.stdout)
         self.assertEqual(self.requests[-1][0], "/api/entry/testuser/size/20/page/0")
+
+    def test_recent_show_ids(self):
+        result = self.cli_run("-r", "--show-ids", body="ignored")
+        self.assertEqual(result.stdout,
+                         'id=42 0 2026-10-26T12:30:00Z Title "one"\n\nBody\n雪\n\n')
+        self.assertEqual(len(self.requests), 2)
+
+    def test_recent_show_ids_requires_valid_id(self):
+        type(self).mode = "recent_missing_id"
+        result = self.cli_run("-r", "--show-ids", ok=False)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("invalid entry ID", result.stderr)
+
+    def test_entry_action_option_errors_do_not_send_requests(self):
+        cases = (("--show-ids",), ("--edit", "0"), ("--delete", "-1"),
+                 ("--edit", "42x"), ("--delete", "2147483648"),
+                 ("--edit", "42", "--delete", "42"),
+                 ("-r", "--edit", "42"), ("-r", "--delete", "42"),
+                 ("--delete", "42", "-s", "title"),
+                 ("--delete", "42", "--format=html"))
+        for args in cases:
+            with self.subTest(args=args):
+                type(self).requests = []
+                self.cli_run(*args, ok=False)
+                self.assertEqual(self.requests, [])
+
+    def test_edit_preserves_metadata_and_replaces_body(self):
+        result = self.cli_run("--edit", "42", body="New body\n")
+        self.assertEqual(result.stdout, "")
+        self.assertEqual([r[0] for r in self.requests],
+                         ["/api/login", "/api/entry/testuser/eid/42", "/api/entry"])
+        update = self.requests[-1][2]
+        self.assertEqual(update["entryId"], 42)
+        self.assertEqual(update["body"], "New body\n")
+        self.assertEqual(update["subject"], "Existing title")
+        self.assertEqual(update["security"], 1)
+        self.assertEqual(update["format"], "MARKDOWN")
+        self.assertEqual(update["date"], "2026-10-26T12:30:00Z")
+        self.assertEqual(update["tags"], ["existing"])
+        self.assertEqual(update["mood"], 19)
+        self.assertEqual(update["location"], 3)
+        self.assertIs(update["draft"], True)
+        self.assertIs(update["allowComments"], False)
+
+    def test_edit_metadata_overrides(self):
+        cases = ((["-s", "New title"], "subject", "New title"),
+                 (["--security=private"], "security", 0),
+                 (["--format=text"], "format", "TEXT"),
+                 (["--date=2026-10-25T18:30:00Z"], "date",
+                  "2026-10-25T18:30:00Z"))
+        for args, field, expected in cases:
+            with self.subTest(field=field):
+                type(self).requests = []
+                self.cli_run("--edit=42", *args, body="New body")
+                update = self.requests[-1][2]
+                self.assertEqual(update[field], expected)
+                self.assertEqual(update["subject"], "New title" if field == "subject" else "Existing title")
+                self.assertEqual(update["security"], 0 if field == "security" else 1)
+                self.assertEqual(update["format"], "TEXT" if field == "format" else "MARKDOWN")
+                self.assertIs(update["autoFormat"], field == "format")
+                self.assertEqual(update["date"], expected if field == "date" else "2026-10-26T12:30:00Z")
+
+    def test_edit_and_delete_failures(self):
+        for flag, mode, count in (("--edit", "edit_bad_entry", 2),
+                                  ("--edit", "edit_500", 3),
+                                  ("--edit", "edit_wrong_id", 3),
+                                  ("--delete", "delete_500", 2),
+                                  ("--delete", "delete_wrong_id", 2)):
+            with self.subTest(flag=flag, mode=mode):
+                type(self).mode = mode
+                type(self).requests = []
+                self.cli_run(flag, "42", ok=False)
+                self.assertEqual(len(self.requests), count)
+
+    def test_delete_does_not_read_body(self):
+        self.cli_run("--delete", "42", body="must not be posted")
+        self.assertEqual([r[0] for r in self.requests], ["/api/login", "/api/entry/42"])
+        self.assertIsNone(self.requests[-1][2])
 
     def test_recent_empty_and_invalid(self):
         type(self).mode = "recent_empty"

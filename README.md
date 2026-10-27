@@ -104,6 +104,21 @@ and drafts for your account) without posting. For example:
 jjclient -u username -r
 ```
 
+Add `--show-ids` to print each entry's server ID before its list number. Use
+that ID to edit or delete an entry:
+
+```sh
+jjclient -u username -r --show-ids
+jjclient -u username --edit 123 < revised-entry.txt
+jjclient -u username --edit 123 -s 'Revised title' < revised-entry.txt
+jjclient -u username --delete 123
+```
+
+Editing replaces the body and preserves the existing subject, date, visibility,
+format, tags, and other entry settings unless you override them with `-s`,
+`--date`, `--security`, or `--format`. Deleting removes the entry and its
+comments. `--delete` does not read standard input.
+
 Posting options:
 
 - `--security public|friends|private` selects visibility (default: `public`).
@@ -183,6 +198,9 @@ The server must support the JSON session login at POST /api/login and entry
 creation at POST /api/entry. The CLI's -r option uses the authenticated
 GET /api/entry/{username}/size/20/page/0 endpoint. Servers supporting only
 XML-RPC require an older client.
+Editing also requires GET /api/entry/{username}/eid/{id} and PUT /api/entry;
+deletion requires DELETE /api/entry/{id}. These endpoints are described in the
+[Just Journal API documentation](https://www.justjournal.com/support/api).
 
 Both clients verify HTTPS certificates. Session cookies are held in memory
 for the current operation and are never saved to disk. Redirects and
