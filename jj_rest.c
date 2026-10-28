@@ -536,11 +536,16 @@ static bool edit_entry(jj_rest *client, const char *username, int64_t entry_id,
     bool format_set, const char *music, json_t *tags,
     char *error, size_t error_size)
 {
-    char *escaped = curl_easy_escape(client->curl, username, 0);
+    char *escaped;
     char *path;
     json_t *entry, *security, *result;
     bool ok = false;
 
+    if ((date_set || security_set || format_set) && !options) {
+        snprintf(error, error_size, "Entry options are required for requested overrides.");
+        return false;
+    }
+    escaped = curl_easy_escape(client->curl, username, 0);
     if (!escaped) {
         snprintf(error, error_size, "Unable to encode username.");
         return false;

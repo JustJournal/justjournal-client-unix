@@ -223,6 +223,16 @@ int main(void)
         fputs("Unable to initialize offline test client.\n", stderr);
         return 1;
     }
+    for (size_t override = 0; override < 3; override++) {
+        error[0] = '\0';
+        ok = jj_rest_edit(client, "synthetic-user", 1, NULL, "body", false,
+            NULL, override == 0, override == 1, override == 2,
+            error, sizeof(error));
+        if (ok || !error[0] || performed != 0) {
+            fputs("Missing entry options regression.\n", stderr);
+            return 1;
+        }
+    }
     allocation_calls = 0;
     ok = jj_rest_login(client, "synthetic-user", marker, error, sizeof(error));
     login_allocations = allocation_calls;

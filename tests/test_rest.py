@@ -715,6 +715,25 @@ sys.exit(status if status >= 0 else 128 - status)
         self.assertIn("SSL", result.stderr)
         self.assertEqual(self.requests, [])
 
+    def test_host_syntax_is_checked_without_resolution(self):
+        valid = ("localhost", "127.0.0.1", "unresolvable.invalid", "example.com.")
+        invalid = ("", "-host", "host-", "bad..host", "bad/host", "host:443",
+                   "a" * 64 + ".example", "a." * 127 + "a")
+        for host in valid:
+            with self.subTest(host=host):
+                result = subprocess.run(
+                    [str(self.cli), "-h", host, "-u", "testuser", "-p", "bad/ss"],
+                    capture_output=True, text=True, timeout=5)
+                self.assertIn("Invalid password", result.stderr)
+                self.assertNotIn("Invalid hostname", result.stderr)
+        for host in invalid:
+            with self.subTest(host=host):
+                result = subprocess.run(
+                    [str(self.cli), "-h", host, "-u", "testuser", "-p", "bad/ss"],
+                    capture_output=True, text=True, timeout=5)
+                self.assertIn("Invalid hostname", result.stderr)
+        self.assertEqual(self.requests, [])
+
     def test_recent_entries(self):
         for mode in ("ok", "recent_hal"):
             with self.subTest(mode=mode):

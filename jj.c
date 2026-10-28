@@ -43,8 +43,6 @@ SUCH DAMAGE.
 #include <limits.h>
 #include <inttypes.h>
 #include <ctype.h>
-#include <netdb.h>
-#include <sys/socket.h>
 #include <regex.h>
 
 #include "jj_rest.h"
@@ -573,7 +571,7 @@ static bool is_valid_username(const char *input) {
     reti = regcomp(&regex, "^[A-Za-z0-9_]+$", REG_EXTENDED);
     if (reti) {
         fprintf(stderr, "Could not compile regex\n");
-        exit(EXIT_FAILURE);
+        return false;
     }
 
     reti = regexec(&regex, input, 0, NULL, 0);
@@ -589,7 +587,7 @@ static bool is_valid_username(const char *input) {
         regerror(reti, &regex, msgbuf, sizeof(msgbuf));
         fprintf(stderr, "Regex match failed: %s\n", msgbuf);
         regfree(&regex);
-        exit(EXIT_FAILURE);
+        return false;
     }
 }
 
@@ -605,7 +603,7 @@ static bool is_valid_password(const char *input) {
     reti = regcomp(&regex, "^[A-Za-z0-9_@.!&*#$?^ ]+$", REG_EXTENDED);
     if (reti) {
         fprintf(stderr, "Could not compile regex\n");
-        exit(EXIT_FAILURE);
+        return false;
     }
 
     reti = regexec(&regex, input, 0, NULL, 0);
@@ -621,21 +619,34 @@ static bool is_valid_password(const char *input) {
         regerror(reti, &regex, msgbuf, sizeof(msgbuf));
         fprintf(stderr, "Regex match failed: %s\n", msgbuf);
         regfree(&regex);
-        exit(EXIT_FAILURE);
+        return false;
     }
 }
 
 static bool is_valid_hostname(const char *hostname) {
-    struct addrinfo hints, *res;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    
-    int status = getaddrinfo(hostname, NULL, &hints, &res);
-    if (status != 0) {
+    size_t length = strlen(hostname);
+    size_t label_length = 0;
+
+    if (length == 0 || length > 253)
         return false;
+    for (size_t i = 0; i < length; i++) {
+        unsigned char c = (unsigned char)hostname[i];
+        bool alphanumeric = (c >= 'A' && c <= 'Z') ||
+            (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+
+        if (c == '.') {
+            if (label_length == 0 || hostname[i - 1] == '-')
+                return false;
+            label_length = 0;
+        } else if (alphanumeric || (c == '-' && label_length != 0)) {
+            if (++label_length > 63)
+                return false;
+        } else {
+            return false;
+        }
     }
-    
-    freeaddrinfo(res);
+    /* A final dot is valid for a fully qualified hostname. */
+    if (hostname[length - 1] == '-')
+        return false;
     return true;
 }
