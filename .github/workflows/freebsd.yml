@@ -16,12 +16,12 @@ jobs:
     strategy:
       matrix:
         arch: ['aarch64', 'x86_64']
-        version: ['14.3', '15.0']
+        version: ['14.4', '15.0']
     steps:
       - uses: actions/checkout@v4
 
       - name: Compile
-        uses: vmactions/freebsd-vm@v1.3.7
+        uses: vmactions/freebsd-vm@v1.4.4
         with:
           arch: ${{ matrix.arch }}
           release: ${{ matrix.version }}
