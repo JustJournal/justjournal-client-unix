@@ -200,7 +200,7 @@ directory remain available as CMake wrappers and place `gtkjj` there.
 
 ## Compatibility
 
-Both clients are version 2.2.0 and target MidnightBSD, FreeBSD, and Linux.
+Both clients are version 2.2.2 and target MidnightBSD, FreeBSD, and Linux.
 The server must support the JSON session login at POST /api/login and entry
 creation at POST /api/entry. The CLI's -r option uses the authenticated
 GET /api/entry/{username}/size/20/page/0 endpoint. Servers supporting only
