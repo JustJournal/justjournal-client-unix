@@ -44,6 +44,7 @@ SUCH DAMAGE.
 #include <inttypes.h>
 #include <ctype.h>
 #include <regex.h>
+#include <arpa/inet.h>
 
 #include "jj_rest.h"
 #include "jj_password.h"
@@ -81,6 +82,7 @@ static bool getRecentPosts(jj_rest *client, const char *username, bool show_ids,
     char *error, size_t error_size);
 
 static bool is_valid_hostname(const char *hostname);
+static bool is_ipv6_literal(const char *input);
 static bool is_valid_username(const char *input);
 static bool is_valid_password(const char *input);
 
@@ -305,7 +307,11 @@ int main(int argc, char *argv[])
                 exit(EXIT_FAILURE);
             }
 
-            (void)snprintf(host, sizeof(host), "https://%s", optarg);
+            /* IPv6 literals must be bracketed inside a URL host. */
+            if (is_ipv6_literal(optarg))
+                (void)snprintf(host, sizeof(host), "https://[%s]", optarg);
+            else
+                (void)snprintf(host, sizeof(host), "https://%s", optarg);
             host[sizeof(host) - 1] = '\0';
 
             hflag = true;
@@ -623,12 +629,76 @@ static bool is_valid_password(const char *input) {
     }
 }
 
+/* Dotted-quad IPv4: exactly four octets, each 0-255, no leading zeros
+ * unless the octet is "0" itself. */
+static bool is_valid_ipv4(const char *input)
+{
+    int octets = 0;
+    const char *p = input;
+
+    if (*p == '\0')
+        return false;
+    while (*p) {
+        int value = 0;
+        int digits = 0;
+
+        if (*p == '0' && p[1] != '.' && p[1] != '\0')
+            return false; /* leading zero */
+        while (*p >= '0' && *p <= '9') {
+            value = value * 10 + (*p - '0');
+            if (value > 255)
+                return false;
+            digits++;
+            p++;
+            if (digits > 3)
+                return false;
+        }
+        if (digits == 0)
+            return false;
+        octets++;
+        if (*p == '.') {
+            p++;
+            if (*p == '\0')
+                return false; /* trailing dot */
+        } else if (*p != '\0') {
+            return false;
+        }
+    }
+    return octets == 4;
+}
+
+/* IPv6 literal, validated with inet_pton (no DNS). */
+static bool is_valid_ipv6(const char *input)
+{
+    struct in6_addr addr;
+    return inet_pton(AF_INET6, input, &addr) == 1;
+}
+
+/* True when input is an IPv6 literal (used to add URL brackets). */
+static bool is_ipv6_literal(const char *input)
+{
+    return strchr(input, ':') != NULL;
+}
+
 static bool is_valid_hostname(const char *hostname) {
     size_t length = strlen(hostname);
     size_t label_length = 0;
+    bool digits_and_dots_only = true;
 
     if (length == 0 || length > 253)
         return false;
+
+    /* IP address literals get dedicated validation. */
+    if (is_ipv6_literal(hostname))
+        return is_valid_ipv6(hostname);
+    for (size_t i = 0; i < length; i++) {
+        unsigned char c = (unsigned char)hostname[i];
+        if (!(c == '.' || (c >= '0' && c <= '9')))
+            digits_and_dots_only = false;
+    }
+    if (digits_and_dots_only)
+        return is_valid_ipv4(hostname);
+
     for (size_t i = 0; i < length; i++) {
         unsigned char c = (unsigned char)hostname[i];
         bool alphanumeric = (c >= 'A' && c <= 'Z') ||

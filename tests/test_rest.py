@@ -716,9 +716,16 @@ sys.exit(status if status >= 0 else 128 - status)
         self.assertEqual(self.requests, [])
 
     def test_host_syntax_is_checked_without_resolution(self):
-        valid = ("localhost", "127.0.0.1", "unresolvable.invalid", "example.com.")
+        valid = ("localhost", "127.0.0.1", "0.0.0.0", "255.255.255.255",
+                 "unresolvable.invalid", "example.com.",
+                 "::1", "2001:db8::1", "fe80::a:b:c:d",
+                 "2001:0db8:85a3:0000:0000:8a2e:0370:7334", "::")
         invalid = ("", "-host", "host-", "bad..host", "bad/host", "host:443",
-                   "a" * 64 + ".example", "a." * 127 + "a")
+                   "a" * 64 + ".example", "a." * 127 + "a",
+                   "256.1.1.1", "1.2.3", "1.2.3.4.5", "01.2.3.4",
+                   "1.2.3.04", "1..2.3", ".1.2.3", "1.2.3.",
+                   "12345.0.0.1", "1234::5678::9",
+                   "gggg::1", "2001:db8:::1", ":::1")
         for host in valid:
             with self.subTest(host=host):
                 result = subprocess.run(
