@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     name: freebsd-${{ matrix.version}}-${{ matrix.arch}}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     concurrency:
       group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ matrix.arch }}-${{ matrix.version }}
       cancel-in-progress: true
@@ -29,7 +29,6 @@ jobs:
           usesh: true
           envs: |
             PKG_DISABLE_AUTOUPDATE=1
-            ASSUME_ALWAYS_YES=1
           prepare: pkg install -y cmake pkgconf curl jansson
           run: |
             cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
