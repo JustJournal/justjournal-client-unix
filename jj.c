@@ -44,6 +44,8 @@ SUCH DAMAGE.
 #include <inttypes.h>
 #include <ctype.h>
 #include <regex.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include <arpa/inet.h>
 
 #include "jj_rest.h"
