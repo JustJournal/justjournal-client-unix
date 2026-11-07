@@ -1,0 +1,20 @@
+
+name: Test
+
+on: [push]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: A job to run test in MidnightBSD
+    steps:
+    - uses: actions/checkout@v7
+    - name: Test in MidnightBSD
+      id: test
+      uses: vmactions/midnightbsd-vm@v1
+      with:
+        prepare: |
+          mport install cmake pkgconf curl jansson || true
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
