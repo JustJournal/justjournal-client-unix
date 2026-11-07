@@ -71,7 +71,7 @@ jj_rest *jj_rest_open(const char *base_url, const char *agent,
 {
     jj_rest *client;
 
-    if (strncmp(base_url, "https://", 8) != 0) {
+    if (!base_url || strncmp(base_url, "https://", 8) != 0) {
         snprintf(error, error_size, "HTTPS is required.");
         return NULL;
     }
@@ -135,6 +135,10 @@ static json_t *request_body(jj_rest *client, const char *path, const char *body,
         method && strcmp(method, "PUT") == 0 ? "Updating entry" :
         body ? "Saving entry" : "Loading entries";
 
+    if (!client || !client->curl || !client->base_url) {
+        snprintf(error, error_size, "%s failed: unable to prepare REST request.", operation);
+        return NULL;
+    }
     client->last_auth_failure = false;
     snprintf(error, error_size, "%s failed: unable to prepare REST request.", operation);
     url = malloc(strlen(client->base_url) + strlen(path) + 1);
@@ -278,8 +282,13 @@ static char *login_body(const char *username, const char *password, size_t *capa
 {
     const size_t overhead = sizeof("{\"username\":\"\",\"password\":\"\"}");
     const size_t maximum = (SIZE_MAX - overhead) / 6;
-    size_t username_size = strlen(username), password_size = strlen(password);
+    size_t username_size, password_size;
     char *body, *out;
+
+    if (!username || !password)
+        return NULL;
+    username_size = strlen(username);
+    password_size = strlen(password);
 
     /* Every input byte needs at most six output bytes (a JSON \\u00XX escape). */
     if (username_size > maximum || password_size > maximum - username_size)
@@ -311,14 +320,26 @@ static bool string_is(json_t *value, const char *expected)
     return json_is_string(value) && strcmp(json_string_value(value), expected) == 0;
 }
 
+/* Set a new member value, rejecting NULL constructor results. On a failed
+ * json_object_set_new() call Jansson releases the value, so nothing leaks. */
+static bool set_new_checked(json_t *object, const char *key, json_t *value)
+{
+    return value && json_object_set_new(object, key, value) == 0;
+}
+
 bool jj_rest_login(jj_rest *client, const char *username, const char *password,
     char *error, size_t error_size)
 {
     size_t capacity = 0;
-    char *body = login_body(username, password, &capacity);
+    char *body;
     json_t *result;
     bool ok;
 
+    if (!client) {
+        snprintf(error, error_size, "Login failed: unable to prepare REST request.");
+        return false;
+    }
+    body = login_body(username, password, &capacity);
     if (!body) {
         snprintf(error, error_size, "Unable to encode credentials as UTF-8 JSON.");
         return false;
@@ -352,6 +373,14 @@ bool jj_rest_post_with_options(jj_rest *client, const char *subject, const char 
     const jj_entry_options defaults = JJ_ENTRY_OPTIONS_INIT;
     bool ok;
 
+    if (!client) {
+        snprintf(error, error_size, "Saving entry failed: unable to prepare REST request.");
+        return false;
+    }
+    if (!subject || !body) {
+        snprintf(error, error_size, "Unable to encode entry as UTF-8 JSON.");
+        return false;
+    }
     if (!options)
         options = &defaults;
     if (options->security < 0 || options->security > 2 || !options->format ||
@@ -377,7 +406,7 @@ bool jj_rest_post_with_options(jj_rest *client, const char *subject, const char 
         snprintf(error, error_size, "Unable to encode entry as UTF-8 JSON.");
         return false;
     }
-    if (options->date && json_object_set_new(payload, "date", json_string(options->date)) != 0) {
+    if (options->date && !set_new_checked(payload, "date", json_string(options->date))) {
         json_decref(payload);
         snprintf(error, error_size, "Unable to encode entry date.");
         return false;
@@ -419,7 +448,7 @@ bool jj_rest_post_with_options(jj_rest *client, const char *subject, const char 
             }
             memmove(start, end + 8, strlen(end + 8) + 1);
         }
-        if (json_object_set_new(payload, "body", json_string(copy)) != 0) {
+        if (!set_new_checked(payload, "body", json_string(copy))) {
             free(copy);
             json_decref(payload);
             snprintf(error, error_size, "Unable to encode body.");
@@ -436,8 +465,8 @@ bool jj_rest_post_with_options(jj_rest *client, const char *subject, const char 
                 start += 7;
                 continue;
             }
-            if (json_object_set_new(payload, "music",
-                json_stringn(start + 7, (size_t)(end - start - 7))) != 0) {
+            if (!set_new_checked(payload, "music",
+                json_stringn(start + 7, (size_t)(end - start - 7)))) {
                 free(copy);
                 json_decref(payload);
                 snprintf(error, error_size, "Unable to encode music.");
@@ -465,9 +494,19 @@ bool jj_rest_post_with_options(jj_rest *client, const char *subject, const char 
 json_t *jj_rest_recent(jj_rest *client, const char *username, size_t count,
     char *error, size_t error_size)
 {
-    char *escaped = curl_easy_escape(client->curl, username, 0);
+    char *escaped;
     char *path;
     json_t *result, *entries, *embedded;
+
+    if (!client || !client->curl) {
+        snprintf(error, error_size, "Loading entries failed: unable to prepare REST request.");
+        return NULL;
+    }
+    if (!username) {
+        snprintf(error, error_size, "Unable to encode username.");
+        return NULL;
+    }
+    escaped = curl_easy_escape(client->curl, username, 0);
 
     if (!escaped) {
         snprintf(error, error_size, "Unable to encode username.");
@@ -541,8 +580,29 @@ static bool edit_entry(jj_rest *client, const char *username, int64_t entry_id,
     json_t *entry, *security, *result;
     bool ok = false;
 
+    if (!client || !client->curl) {
+        snprintf(error, error_size, "Updating entry failed: unable to prepare REST request.");
+        return false;
+    }
     if ((date_set || security_set || format_set) && !options) {
         snprintf(error, error_size, "Entry options are required for requested overrides.");
+        return false;
+    }
+    if ((date_set && !options->date) ||
+        (security_set && (options->security < 0 || options->security > 2)) ||
+        (format_set && (!options->format ||
+            (strcmp(options->format, "TEXT") != 0 &&
+             strcmp(options->format, "MARKDOWN") != 0 &&
+             strcmp(options->format, "HTML") != 0)))) {
+        snprintf(error, error_size, "Invalid entry security or format.");
+        return false;
+    }
+    if (!username) {
+        snprintf(error, error_size, "Unable to encode username.");
+        return false;
+    }
+    if (!body || (subject_set && !subject)) {
+        snprintf(error, error_size, "Unable to prepare entry update.");
         return false;
     }
     escaped = curl_easy_escape(client->curl, username, 0);
@@ -578,15 +638,16 @@ static bool edit_entry(jj_rest *client, const char *username, int64_t entry_id,
         snprintf(error, error_size, "Server returned an invalid entry for editing.");
         goto cleanup;
     }
-    if (json_object_set_new(entry, "security",
-            json_integer(json_integer_value(security))) != 0 ||
-        json_object_set_new(entry, "body", json_string(body)) != 0 ||
-        (subject_set && json_object_set_new(entry, "subject", json_string(subject)) != 0) ||
-        (date_set && json_object_set_new(entry, "date", json_string(options->date)) != 0) ||
-        (security_set && json_object_set_new(entry, "security", json_integer(options->security)) != 0) ||
-        (format_set && (json_object_set_new(entry, "format", json_string(options->format)) != 0 ||
-            json_object_set_new(entry, "autoFormat", json_boolean(strcmp(options->format, "TEXT") == 0)) != 0)) ||
-        (music && json_object_set_new(entry, "music", json_string(music)) != 0) ||
+    if (!set_new_checked(entry, "security",
+            json_integer(json_integer_value(security))) ||
+        !set_new_checked(entry, "body", json_string(body)) ||
+        (subject_set && !set_new_checked(entry, "subject", json_string(subject))) ||
+        (date_set && !set_new_checked(entry, "date", json_string(options->date))) ||
+        (security_set && !set_new_checked(entry, "security",
+            json_integer(options->security))) ||
+        (format_set && (!set_new_checked(entry, "format", json_string(options->format)) ||
+            !set_new_checked(entry, "autoFormat", json_boolean(strcmp(options->format, "TEXT") == 0)))) ||
+        (music && !set_new_checked(entry, "music", json_string(music))) ||
         (tags && (!json_is_array(tags) || json_object_set(entry, "tags", tags) != 0))) {
         snprintf(error, error_size, "Unable to prepare entry update.");
         goto cleanup;
