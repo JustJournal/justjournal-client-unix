@@ -401,7 +401,7 @@ int main(int argc, char *argv[])
 
     if (!uflag)
     {
-        fprintf(stderr, "Username is required.\n");
+        fprintf(stderr, "Error: Username is required.\n");
         secure_bzero(password, sizeof(password));
         usage(argv[0]);
     }
@@ -448,7 +448,7 @@ int main(int argc, char *argv[])
             success = getRecentPosts(client, username, show_ids, error, sizeof(error));
         jj_rest_close(client);
         if (!success)
-            fprintf(stderr, "ERROR: %s\n", error);
+            fprintf(stderr, "Error: %s\n", error);
         return success ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
@@ -460,7 +460,7 @@ int main(int argc, char *argv[])
             success = jj_rest_delete(client, entry_id, error, sizeof(error));
         jj_rest_close(client);
         if (!success)
-            fprintf(stderr, "ERROR: %s\n", error);
+            fprintf(stderr, "Error: %s\n", error);
         return success ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
@@ -476,7 +476,7 @@ int main(int argc, char *argv[])
 
     if (i == 0)
     {
-        fprintf(stderr, "No entry specified.");
+        fprintf(stderr, "Error: No entry specified.\n");
         secure_bzero(password, sizeof(password));
         return EXIT_FAILURE;
     }
@@ -499,7 +499,7 @@ int main(int argc, char *argv[])
                 &post_options, error, sizeof(error));
     jj_rest_close(client);
     if (!success)
-        fprintf(stderr, "ERROR: %s\n", error);
+        fprintf(stderr, "Error: %s\n", error);
     else if (debug)
         fprintf(stderr, "Debug: entry saved.\n");
     return success ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -576,7 +576,7 @@ static bool is_valid_username(const char *input) {
 
     reti = regcomp(&regex, "^[A-Za-z0-9_]+$", REG_EXTENDED);
     if (reti) {
-        fprintf(stderr, "Could not compile regex\n");
+        fprintf(stderr, "Error: Could not compile regex\n");
         return false;
     }
 
@@ -591,7 +591,7 @@ static bool is_valid_username(const char *input) {
     }
     else {
         regerror(reti, &regex, msgbuf, sizeof(msgbuf));
-        fprintf(stderr, "Regex match failed: %s\n", msgbuf);
+        fprintf(stderr, "Error: Regex match failed: %s\n", msgbuf);
         regfree(&regex);
         return false;
     }
@@ -608,7 +608,7 @@ static bool is_valid_password(const char *input) {
 
     reti = regcomp(&regex, "^[A-Za-z0-9_@.!&*#$?^ ]+$", REG_EXTENDED);
     if (reti) {
-        fprintf(stderr, "Could not compile regex\n");
+        fprintf(stderr, "Error: Could not compile regex\n");
         return false;
     }
 
@@ -623,7 +623,7 @@ static bool is_valid_password(const char *input) {
     }
     else {
         regerror(reti, &regex, msgbuf, sizeof(msgbuf));
-        fprintf(stderr, "Regex match failed: %s\n", msgbuf);
+        fprintf(stderr, "Error: Regex match failed: %s\n", msgbuf);
         regfree(&regex);
         return false;
     }
