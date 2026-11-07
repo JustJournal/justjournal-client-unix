@@ -18,11 +18,12 @@ jobs:
         arch: ['aarch64', 'x86_64']
         version: ['14.4', '15.1']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Compile
-        uses: vmactions/freebsd-vm@v1.4.9
+        uses: vmactions/freebsd-vm@v1
         with:
+          cache-after-prepare: true
           arch: ${{ matrix.arch }}
           release: ${{ matrix.version }}
           usesh: true
