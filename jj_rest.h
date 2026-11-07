@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <jansson.h>
 
-#define JJ_VERSION "2.2.1"
+#define JJ_VERSION "2.2.2"
 #define JJ_BASE_URL "https://www.justjournal.com"
 
 typedef struct jj_rest jj_rest;
