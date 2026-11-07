@@ -233,6 +233,35 @@ int main(void)
             return 1;
         }
     }
+    {
+        const jj_entry_options invalid_options = {2, NULL, NULL};
+        if (jj_rest_open(NULL, "credential-test", error, sizeof(error)) ||
+            jj_rest_login(NULL, "synthetic-user", marker, error, sizeof(error)) ||
+            jj_rest_login(client, NULL, marker, error, sizeof(error)) ||
+            jj_rest_login(client, "synthetic-user", NULL, error, sizeof(error)) ||
+            jj_rest_post(NULL, "subject", "body", NULL, NULL, error, sizeof(error)) ||
+            jj_rest_post(client, NULL, "body", NULL, NULL, error, sizeof(error)) ||
+            jj_rest_post(client, "subject", NULL, NULL, NULL, error, sizeof(error)) ||
+            jj_rest_recent(NULL, "synthetic-user", 1, error, sizeof(error)) ||
+            jj_rest_recent(client, NULL, 1, error, sizeof(error)) ||
+            jj_rest_edit(NULL, "synthetic-user", 1, NULL, "body", false,
+                NULL, false, false, false, error, sizeof(error)) ||
+            jj_rest_edit(client, NULL, 1, NULL, "body", false,
+                NULL, false, false, false, error, sizeof(error)) ||
+            jj_rest_edit(client, "synthetic-user", 1, NULL, NULL, false,
+                NULL, false, false, false, error, sizeof(error)) ||
+            jj_rest_edit(client, "synthetic-user", 1, NULL, "body", true,
+                NULL, false, false, false, error, sizeof(error)) ||
+            jj_rest_edit(client, "synthetic-user", 1, NULL, "body", false,
+                &invalid_options, true, false, false, error, sizeof(error)) ||
+            jj_rest_edit(client, "synthetic-user", 1, NULL, "body", false,
+                &invalid_options, false, false, true, error, sizeof(error)) ||
+            jj_rest_delete(NULL, 1, error, sizeof(error)) ||
+            performed != 0) {
+            fputs("NULL argument guard regression.\n", stderr);
+            return 1;
+        }
+    }
     allocation_calls = 0;
     ok = jj_rest_login(client, "synthetic-user", marker, error, sizeof(error));
     login_allocations = allocation_calls;
